@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { AdminPasscodeModal } from './components/AdminPasscodeModal';
 import { HeaderBanner } from './components/HeaderBanner';
 import { MemberTable } from './components/MemberTable';
 import { SuccessPopupModal, ToastStack } from './components/NotificationModals';
@@ -19,10 +20,14 @@ import {
   sendMemberToTelegram,
 } from './utils/telegram';
 
+const ADMIN_PASSCODE = '1234';
+
 export default function App() {
   const [members, setMembers] = useState<Member[]>(() =>
     loadMembersFromStorage()
   );
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState<SuccessModalPayload | null>(
@@ -44,6 +49,24 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const handleVerifyAdminPasscode = useCallback(
+    (enteredCode: string): boolean => {
+      if (enteredCode === ADMIN_PASSCODE) {
+        setIsAdmin(true);
+        setIsPasscodeModalOpen(false);
+        pushToast('success', 'បានបើកដំណើរការ Admin Mode ដោយជោគជ័យ។');
+        return true;
+      }
+      return false;
+    },
+    [pushToast]
+  );
+
+  const handleLockAdmin = useCallback(() => {
+    setIsAdmin(false);
+    pushToast('info', 'បានចាក់សោ Admin Mode ត្រឡប់ទៅទម្រង់សម្រាប់ភ្ញៀវវិញ។');
+  }, [pushToast]);
 
   const persistMembers = useCallback(
     (nextMembers: Member[]): boolean => {
@@ -241,6 +264,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F6F8F9] text-slate-900 flex flex-col">
       <HeaderBanner
+        isAdmin={isAdmin}
+        onOpenAdminModal={() => setIsPasscodeModalOpen(true)}
+        onLockAdmin={handleLockAdmin}
         totalCount={stats.totalCount}
         maleCount={stats.maleCount}
         femaleCount={stats.femaleCount}
@@ -248,37 +274,56 @@ export default function App() {
       />
 
       <main className="mx-auto w-full max-w-[1380px] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-7">
-          {/* Left Column: Registration Form */}
-          <div className="lg:col-span-4">
+        {isAdmin ? (
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-7">
+            {/* Left Column: Registration Form */}
+            <div className="lg:col-span-4">
+              <RegistrationForm
+                onRegister={handleRegisterMember}
+                onError={(msg) => pushToast('error', msg)}
+              />
+            </div>
+
+            {/* Right Column: Admin Member Table, Search & Excel/Sheets Tools */}
+            <div className="lg:col-span-8">
+              <MemberTable
+                members={members}
+                isImporting={isImporting}
+                resendingId={resendingId}
+                onImportExcel={handleImportExcel}
+                onExportExcel={handleExportExcel}
+                onCopyGoogleSheets={handleCopyGoogleSheets}
+                onDeleteMember={handleDeleteMember}
+                onResendTelegram={handleResendTelegram}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-xl">
             <RegistrationForm
               onRegister={handleRegisterMember}
               onError={(msg) => pushToast('error', msg)}
             />
           </div>
-
-          {/* Right Column: Member Table, Search & Excel/Sheets Tools */}
-          <div className="lg:col-span-8">
-            <MemberTable
-              members={members}
-              isImporting={isImporting}
-              resendingId={resendingId}
-              onImportExcel={handleImportExcel}
-              onExportExcel={handleExportExcel}
-              onCopyGoogleSheets={handleCopyGoogleSheets}
-              onDeleteMember={handleDeleteMember}
-              onResendTelegram={handleResendTelegram}
-            />
-          </div>
-        </div>
+        )}
       </main>
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-[1380px] flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:px-6 lg:px-8">
           <p>ប្រព័ន្ធចុះឈ្មោះសមាជិក និងភ្ញៀវថ្មី</p>
-          <p>ទិន្នន័យត្រូវបានរក្សាទុកក្នុងកម្មវិធីរុករក (localStorage) និងគាំទ្រ Excel / Google Sheets</p>
+          <p>
+            {isAdmin
+              ? 'ទិន្នន័យត្រូវបានរក្សាទុកក្នុងកម្មវិធីរុករក (localStorage) និងគាំទ្រ Excel / Google Sheets'
+              : 'សូមអរគុណសម្រាប់ការចុះឈ្មោះព័ត៌មានរបស់លោកអ្នក'}
+          </p>
         </div>
       </footer>
+
+      <AdminPasscodeModal
+        isOpen={isPasscodeModalOpen}
+        onClose={() => setIsPasscodeModalOpen(false)}
+        onVerify={handleVerifyAdminPasscode}
+      />
 
       <SuccessPopupModal
         payload={successModal}

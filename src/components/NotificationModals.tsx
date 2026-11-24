@@ -108,10 +108,17 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
         {/* Explicit Telegram Delivery Status (Icon + Text, never hue-only) */}
         <div className="mt-4 text-xs">
           {telegramSent ? (
-            <p className="flex items-center gap-2 font-medium text-emerald-700">
-              <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-              បានផ្ញើជូនដំណឹងទៅកាន់ Telegram ដោយជោគជ័យ។
-            </p>
+            <div className="space-y-1">
+              <p className="flex items-center gap-2 font-medium text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                បានផ្ញើជូនដំណឹងទៅកាន់ Telegram ដោយជោគជ័យ។
+              </p>
+              {telegramError && (
+                <p className="pl-6 font-mono text-[11px] text-amber-700">
+                  {telegramError}
+                </p>
+              )}
+            </div>
           ) : (
             <div className="space-y-1 text-amber-800">
               <p className="flex items-center gap-2 font-medium">

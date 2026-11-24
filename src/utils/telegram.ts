@@ -5,8 +5,12 @@ const TELEGRAM_BOT_TOKEN =
   import.meta.env.VITE_TELEGRAM_BOT_TOKEN ||
   '9191309203:AAEm-_I9cjuCvGVnefdXCDazYhvbX3XCVbs';
 
-const TELEGRAM_CHAT_ID =
-  import.meta.env.VITE_TELEGRAM_CHAT_ID || '6992529628';
+const TELEGRAM_CHAT_IDS: string[] = (
+  import.meta.env.VITE_TELEGRAM_CHAT_IDS || '6992529628,8468559961'
+)
+  .split(',')
+  .map((id: string) => id.trim())
+  .filter(Boolean);
 
 function escapeHtml(text: string): string {
   return text
@@ -36,23 +40,16 @@ export function formatKhmerMemberCaption(member: Member): string {
   ].join('\n');
 }
 
-/**
- * Sends a single newly registered member to Telegram.
- * Uses sendPhoto (FormData) if a photo Blob or dataUrl is available, otherwise sendMessage.
- */
-export async function sendMemberToTelegram(
+async function sendSingleChatMember(
+  chatId: string,
   member: Member,
-  photoBlob?: Blob | null
+  caption: string,
+  resolvedBlob: Blob | null
 ): Promise<TelegramSendResult> {
-  const caption = formatKhmerMemberCaption(member);
-
   try {
-    const resolvedBlob =
-      photoBlob ?? (member.photoDataUrl ? dataUrlToBlob(member.photoDataUrl) : null);
-
     if (resolvedBlob) {
       const formData = new FormData();
-      formData.append('chat_id', TELEGRAM_CHAT_ID);
+      formData.append('chat_id', chatId);
       formData.append('photo', resolvedBlob, `member_${member.id}.jpg`);
       formData.append('caption', caption);
       formData.append('parse_mode', 'HTML');
@@ -86,7 +83,7 @@ export async function sendMemberToTelegram(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
+          chat_id: chatId,
           text: caption,
           parse_mode: 'HTML',
         }),
@@ -115,8 +112,94 @@ export async function sendMemberToTelegram(
   }
 }
 
+async function sendSingleChatText(
+  chatId: string,
+  text: string
+): Promise<TelegramSendResult> {
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: 'HTML',
+        }),
+      }
+    );
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.ok) {
+      return {
+        ok: false,
+        error:
+          data?.description ||
+          `Telegram API error (HTTP ${response.status})`,
+      };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'មិនអាចភ្ជាប់ទៅកាន់ Telegram API បានទេ។',
+    };
+  }
+}
+
 /**
- * Sends a formatted Khmer summary notification to Telegram after bulk Excel import.
+ * Sends a newly registered member to all configured Telegram recipients (both Chat IDs).
+ * Uses sendPhoto (FormData) if a photo Blob or dataUrl is available, otherwise sendMessage.
+ */
+export async function sendMemberToTelegram(
+  member: Member,
+  photoBlob?: Blob | null
+): Promise<TelegramSendResult> {
+  const caption = formatKhmerMemberCaption(member);
+  const resolvedBlob =
+    photoBlob ?? (member.photoDataUrl ? dataUrlToBlob(member.photoDataUrl) : null);
+
+  const results = await Promise.all(
+    TELEGRAM_CHAT_IDS.map((chatId) =>
+      sendSingleChatMember(chatId, member, caption, resolvedBlob)
+    )
+  );
+
+  const failed = results
+    .map((res, idx) => ({ res, chatId: TELEGRAM_CHAT_IDS[idx] }))
+    .filter(({ res }) => !res.ok);
+
+  if (failed.length === 0) {
+    return { ok: true };
+  }
+
+  const succeededCount = results.length - failed.length;
+  const errorDetails = failed
+    .map(({ chatId, res }) => `Chat ${chatId}: ${res.error || 'Error'}`)
+    .join(' | ');
+
+  if (succeededCount > 0) {
+    return {
+      ok: true,
+      error: `ផ្ញើបាន ${succeededCount}/${results.length} គណនី (${errorDetails})`,
+    };
+  }
+
+  return {
+    ok: false,
+    error: errorDetails,
+  };
+}
+
+/**
+ * Sends a formatted Khmer summary notification to all configured Telegram recipients after bulk Excel import.
  * Keeps message length safely under Telegram's 4096-character limit.
  */
 export async function sendBulkImportToTelegram(
@@ -148,40 +231,32 @@ export async function sendBulkImportToTelegram(
     ...previewLines,
   ].join('\n');
 
-  try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
-          text,
-          parse_mode: 'HTML',
-        }),
-      }
-    );
+  const results = await Promise.all(
+    TELEGRAM_CHAT_IDS.map((chatId) => sendSingleChatText(chatId, text))
+  );
 
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data?.ok) {
-      return {
-        ok: false,
-        error:
-          data?.description ||
-          `Telegram API error (HTTP ${response.status})`,
-      };
-    }
+  const failed = results
+    .map((res, idx) => ({ res, chatId: TELEGRAM_CHAT_IDS[idx] }))
+    .filter(({ res }) => !res.ok);
 
+  if (failed.length === 0) {
     return { ok: true };
-  } catch (err) {
+  }
+
+  const succeededCount = results.length - failed.length;
+  const errorDetails = failed
+    .map(({ chatId, res }) => `Chat ${chatId}: ${res.error || 'Error'}`)
+    .join(' | ');
+
+  if (succeededCount > 0) {
     return {
-      ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'មិនអាចភ្ជាប់ទៅកាន់ Telegram API បានទេ។',
+      ok: true,
+      error: `ផ្ញើបាន ${succeededCount}/${results.length} គណនី (${errorDetails})`,
     };
   }
+
+  return {
+    ok: false,
+    error: errorDetails,
+  };
 }
