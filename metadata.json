@@ -1,0 +1,6 @@
+{
+  "name": "ប្រព័ន្ធចុះឈ្មោះសមាជិក និងភ្ញៀវថ្មី",
+  "description": "កម្មវិធីគេហទំព័រភាសាខ្មែរសម្រាប់ចុះឈ្មោះ និងគ្រប់គ្រងសមាជិក ឬភ្ញៀវថ្មី ដោយមានការបង្ហោះរូបភាព ការជូនដំណឹង Telegram ភ្លាមៗ និងការនាំចូល/នាំចេញ Excel និង Google Sheets។",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
