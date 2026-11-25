@@ -1,5 +1,13 @@
 export type Gender = 'ប្រុស' | 'ស្រី';
 
+export interface MemberAddress {
+  province: string;
+  district: string;
+  commune: string;
+  village: string;
+  fullAddress: string;
+}
+
 export interface Member {
   id: string;
   fullName: string;
@@ -8,6 +16,7 @@ export interface Member {
   telegram: string;
   role: string;
   joinDate: string; // YYYY-MM-DD
+  address?: MemberAddress;
   photoDataUrl?: string; // Compressed base64 JPEG (max width 600px, quality 0.7)
   createdAt: string; // ISO timestamp
   telegramSent?: boolean;

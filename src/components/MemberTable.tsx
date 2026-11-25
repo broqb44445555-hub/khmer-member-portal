@@ -6,12 +6,15 @@ import {
   ExternalLink,
   FileSpreadsheet,
   Loader2,
+  Pencil,
   Search,
   Send,
+  Tag,
   Trash2,
   User,
   X,
 } from 'lucide-react';
+import { BATTAMBANG_DISTRICTS } from '../data/battambangAddress';
 import type { Gender, Member } from '../types/member';
 
 interface MemberTableProps {
@@ -19,13 +22,17 @@ interface MemberTableProps {
   isImporting: boolean;
   resendingId: string | null;
   onImportExcel: (file: File) => Promise<void>;
-  onExportExcel: () => void;
+  onExportExcel: (subset?: Member[]) => void;
   onCopyGoogleSheets: () => Promise<void>;
+  onEditMember: (member: Member) => void;
   onDeleteMember: (id: string) => void;
+  onBulkDeleteMembers: (ids: string[]) => void;
+  onBulkUpdateRole: (ids: string[], newRole: string) => void;
   onResendTelegram: (member: Member) => Promise<void>;
 }
 
 type GenderFilter = 'all' | Gender;
+type SortOrder = 'newest' | 'oldest' | 'name-asc';
 
 export function MemberTable({
   members,
@@ -34,23 +41,64 @@ export function MemberTable({
   onImportExcel,
   onExportExcel,
   onCopyGoogleSheets,
+  onEditMember,
   onDeleteMember,
+  onBulkDeleteMembers,
+  onBulkUpdateRole,
   onResendTelegram,
 }: MemberTableProps) {
   const excelInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [genderFilter, setGenderFilter] = useState<GenderFilter>('all');
+  const [districtFilter, setDistrictFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [copiedJustNow, setCopiedJustNow] = useState(false);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewMember, setPreviewMember] = useState<Member | null>(null);
   const [confirmDeleteMember, setConfirmDeleteMember] = useState<Member | null>(
     null
   );
+  const [isConfirmBulkDeleteOpen, setIsConfirmBulkDeleteOpen] = useState(false);
+  const [isBulkRoleModalOpen, setIsBulkRoleModalOpen] = useState(false);
+  const [bulkRoleValue, setBulkRoleValue] = useState('');
+
+  const uniqueRoles = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of members) {
+      const r = m.role.trim();
+      if (r) set.add(r);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'km'));
+  }, [members]);
+
+  const districtOptions = useMemo(() => {
+    const set = new Set<string>(BATTAMBANG_DISTRICTS);
+    for (const m of members) {
+      const d = m.address?.district?.trim();
+      if (d) set.add(d);
+    }
+    return Array.from(set);
+  }, [members]);
 
   const filteredMembers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return members.filter((m) => {
+    const list = members.filter((m) => {
       if (genderFilter !== 'all' && m.gender !== genderFilter) {
+        return false;
+      }
+      if (districtFilter !== 'all') {
+        const memberDistrict = m.address?.district?.trim() || '';
+        const memberFull = m.address?.fullAddress || '';
+        if (
+          memberDistrict !== districtFilter &&
+          !memberFull.includes(districtFilter)
+        ) {
+          return false;
+        }
+      }
+      if (roleFilter !== 'all' && m.role.trim() !== roleFilter) {
         return false;
       }
       if (!q) return true;
@@ -59,10 +107,73 @@ export function MemberTable({
         m.phone.toLowerCase().includes(q) ||
         m.telegram.toLowerCase().includes(q) ||
         m.role.toLowerCase().includes(q) ||
-        m.joinDate.toLowerCase().includes(q)
+        m.joinDate.toLowerCase().includes(q) ||
+        (m.address?.fullAddress?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [members, searchQuery, genderFilter]);
+
+    if (sortOrder === 'oldest') {
+      return [...list].sort((a, b) =>
+        (a.joinDate || a.createdAt).localeCompare(b.joinDate || b.createdAt)
+      );
+    }
+    if (sortOrder === 'name-asc') {
+      return [...list].sort((a, b) =>
+        a.fullName.localeCompare(b.fullName, 'km')
+      );
+    }
+    return [...list].sort((a, b) =>
+      (b.joinDate || b.createdAt).localeCompare(a.joinDate || a.createdAt)
+    );
+  }, [
+    members,
+    searchQuery,
+    genderFilter,
+    districtFilter,
+    roleFilter,
+    sortOrder,
+  ]);
+
+  // Keep selectedIds synced to valid existing IDs
+  const validSelectedIds = useMemo(() => {
+    const existing = new Set(members.map((m) => m.id));
+    return Array.from(selectedIds).filter((id) => existing.has(id));
+  }, [members, selectedIds]);
+
+  const allFilteredSelected =
+    filteredMembers.length > 0 &&
+    filteredMembers.every((m) => selectedIds.has(m.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const m of filteredMembers) {
+          next.delete(m.id);
+        }
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const m of filteredMembers) {
+          next.add(m.id);
+        }
+        return next;
+      });
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
 
   const handleExcelFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>
@@ -87,8 +198,42 @@ export function MemberTable({
   const handleConfirmDelete = () => {
     if (!confirmDeleteMember) return;
     onDeleteMember(confirmDeleteMember.id);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(confirmDeleteMember.id);
+      return next;
+    });
     setConfirmDeleteMember(null);
   };
+
+  const handleConfirmBulkDelete = () => {
+    if (validSelectedIds.length === 0) return;
+    onBulkDeleteMembers(validSelectedIds);
+    clearSelection();
+    setIsConfirmBulkDeleteOpen(false);
+  };
+
+  const handleBulkExport = () => {
+    const idSet = new Set(validSelectedIds);
+    const subset = members.filter((m) => idSet.has(m.id));
+    onExportExcel(subset);
+  };
+
+  const handleSubmitBulkRole = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = bulkRoleValue.trim();
+    if (!trimmed || validSelectedIds.length === 0) return;
+    onBulkUpdateRole(validSelectedIds, trimmed);
+    setBulkRoleValue('');
+    setIsBulkRoleModalOpen(false);
+    clearSelection();
+  };
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    genderFilter !== 'all' ||
+    districtFilter !== 'all' ||
+    roleFilter !== 'all';
 
   return (
     <section
@@ -103,10 +248,10 @@ export function MemberTable({
               id="member-table-heading"
               className="text-lg font-semibold text-slate-900"
             >
-              បញ្ជីសមាជិក និងភ្ញៀវ
+              បញ្ជី និងការកែប្រែទិន្នន័យសមាជិក
             </h2>
             <span className="text-xs text-slate-500 tabular-nums">
-              · {filteredMembers.length} / {members.length} នាក់
+              · បង្ហាញ {filteredMembers.length} / {members.length} នាក់
             </span>
           </div>
 
@@ -135,7 +280,7 @@ export function MemberTable({
 
             <button
               type="button"
-              onClick={onExportExcel}
+              onClick={() => onExportExcel()}
               disabled={members.length === 0}
               className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
             >
@@ -169,8 +314,8 @@ export function MemberTable({
           </div>
         </div>
 
-        {/* Search & Segmented Gender Filter */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Search, Role Filter, Sort & Gender Segmented Filter */}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -196,36 +341,128 @@ export function MemberTable({
             )}
           </div>
 
-          <div
-            role="group"
-            aria-label="ច្រោះតាមភេទ"
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 p-1"
-          >
-            {(
-              [
-                { value: 'all', label: 'ទាំងអស់' },
-                { value: 'ប្រុស', label: 'ប្រុស' },
-                { value: 'ស្រី', label: 'ស្រី' },
-              ] as const
-            ).map((tab) => {
-              const active = genderFilter === tab.value;
-              return (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => setGenderFilter(tab.value)}
-                  className={`min-h-[32px] rounded-md px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] ${
-                    active
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* District Filter */}
+            <select
+              aria-label="ច្រោះតាមស្រុក/ក្រុង"
+              value={districtFilter}
+              onChange={(e) => setDistrictFilter(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
+            >
+              <option value="all">ស្រុក/ក្រុងទាំងអស់</option>
+              {districtOptions.map((district) => (
+                <option key={district} value={district}>
+                  {district}
+                </option>
+              ))}
+            </select>
+
+            {/* Role Filter */}
+            <select
+              aria-label="ច្រោះតាមតួនាទី"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
+            >
+              <option value="all">តួនាទីទាំងអស់</option>
+              {uniqueRoles.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+
+            {/* Sort Selector */}
+            <select
+              aria-label="តម្រៀបទិន្នន័យ"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+              className="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
+            >
+              <option value="newest">តម្រៀប៖ ថ្មីបំផុត</option>
+              <option value="oldest">តម្រៀប៖ ចាស់បំផុត</option>
+              <option value="name-asc">តម្រៀប៖ ឈ្មោះ ក–អ</option>
+            </select>
+
+            {/* Gender Filter Tabs */}
+            <div
+              role="group"
+              aria-label="ច្រោះតាមភេទ"
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 p-1"
+            >
+              {(
+                [
+                  { value: 'all', label: 'ទាំងអស់' },
+                  { value: 'ប្រុស', label: 'ប្រុស' },
+                  { value: 'ស្រី', label: 'ស្រី' },
+                ] as const
+              ).map((tab) => {
+                const active = genderFilter === tab.value;
+                return (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setGenderFilter(tab.value)}
+                    className={`min-h-[32px] rounded-md px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] ${
+                      active
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        {/* Contextual Bulk Action Bar */}
+        {validSelectedIds.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#0F4C5C]/20 bg-[#0F4C5C]/[0.04] px-4 py-2.5">
+            <div className="flex items-center gap-3 text-xs font-medium text-slate-800">
+              <span className="tabular-nums">
+                បានជ្រើសរើស <strong className="font-mono">{validSelectedIds.length}</strong> នាក់
+              </span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline whitespace-nowrap"
+              >
+                ដកការជ្រើសរើស
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBulkRoleModalOpen(true)}
+                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              >
+                <Tag className="h-3.5 w-3.5 text-[#0F4C5C]" aria-hidden="true" />
+                ប្តូរតួនាទីរួម
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBulkExport}
+                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              >
+                <Download className="h-3.5 w-3.5 text-[#0F4C5C]" aria-hidden="true" />
+                នាំចេញ Excel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsConfirmBulkDeleteOpen(true)}
+                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 whitespace-nowrap"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                លុបដែលបានជ្រើស ({validSelectedIds.length})
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table / Empty States */}
@@ -238,31 +475,44 @@ export function MemberTable({
             មិនទាន់មានទិន្នន័យសមាជិក ឬភ្ញៀវនៅឡើយទេ
           </h3>
           <p className="mx-auto mt-1.5 max-w-md text-sm text-slate-500">
-            ចាប់ផ្តើមចុះឈ្មោះសមាជិកដំបូងតាមទម្រង់ខាងឆ្វេង ឬចុចប៊ូតុង «នាំចូល Excel (.xlsx)» ដើម្បីបញ្ចូលបញ្ជីឈ្មោះច្រើនក្នុងពេលតែមួយ។
+            អ្នកអាចបន្ថែមសមាជិកថ្មីតាមផ្ទាំង «បន្ថែមសមាជិកថ្មី» ឬចុចប៊ូតុង «នាំចូល Excel (.xlsx)» ដើម្បីបញ្ចូលបញ្ជីឈ្មោះច្រើនក្នុងពេលតែមួយ។
           </p>
         </div>
       ) : filteredMembers.length === 0 ? (
         <div className="px-6 py-14 text-center">
           <p className="text-sm font-medium text-slate-700">
-            រកមិនឃើញសមាជិកដែលត្រូវនឹងការស្វែងរក «{searchQuery}» ទេ
+            រកមិនឃើញសមាជិកដែលត្រូវនឹងលក្ខខណ្ឌស្វែងរកទេ
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchQuery('');
-              setGenderFilter('all');
-            }}
-            className="mt-3 inline-flex min-h-[38px] items-center rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
-          >
-            បង្ហាញសមាជិកទាំងអស់វិញ
-          </button>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setGenderFilter('all');
+                setDistrictFilter('all');
+                setRoleFilter('all');
+              }}
+              className="mt-3 inline-flex min-h-[38px] items-center rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+            >
+              សម្អាតការច្រោះទាំងអស់
+            </button>
+          )}
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-600">
-                <th scope="col" className="py-3 pl-5 pr-3 whitespace-nowrap">
+                <th scope="col" className="w-11 py-3 pl-5 pr-2">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAllFiltered}
+                    aria-label="ជ្រើសរើសទាំងអស់"
+                    className="h-4 w-4 rounded border-slate-300 accent-[#0F4C5C]"
+                  />
+                </th>
+                <th scope="col" className="px-3 py-3 whitespace-nowrap">
                   សមាជិក / រូបភាព
                 </th>
                 <th scope="col" className="px-3 py-3 whitespace-nowrap">
@@ -276,6 +526,9 @@ export function MemberTable({
                 </th>
                 <th scope="col" className="px-3 py-3 whitespace-nowrap">
                   តួនាទី / ប្រភេទភ្ញៀវ
+                </th>
+                <th scope="col" className="px-3 py-3 whitespace-nowrap">
+                  ទីកន្លែងបច្ចុប្បន្ន
                 </th>
                 <th scope="col" className="px-3 py-3 whitespace-nowrap">
                   កាលបរិច្ឆេទ
@@ -292,14 +545,28 @@ export function MemberTable({
               {filteredMembers.map((member) => {
                 const tgHandle = member.telegram.replace(/^@/, '');
                 const isResending = resendingId === member.id;
+                const isSelected = selectedIds.has(member.id);
 
                 return (
                   <tr
                     key={member.id}
-                    className="transition-colors hover:bg-slate-50/80"
+                    className={`transition-colors ${
+                      isSelected ? 'bg-[#0F4C5C]/[0.04]' : 'hover:bg-slate-50/80'
+                    }`}
                   >
+                    {/* Checkbox */}
+                    <td className="py-3 pl-5 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectOne(member.id)}
+                        aria-label={`ជ្រើសរើស ${member.fullName}`}
+                        className="h-4 w-4 rounded border-slate-300 accent-[#0F4C5C]"
+                      />
+                    </td>
+
                     {/* Photo Thumbnail + Full Name */}
-                    <td className="py-3 pl-5 pr-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-3">
                         {member.photoDataUrl ? (
                           <button
@@ -324,14 +591,18 @@ export function MemberTable({
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="truncate font-medium text-slate-900 max-w-[180px] sm:max-w-[220px]">
+                          <button
+                            type="button"
+                            onClick={() => onEditMember(member)}
+                            className="block max-w-[200px] truncate text-left font-medium text-slate-900 hover:text-[#0F4C5C] hover:underline sm:max-w-[240px]"
+                          >
                             {member.fullName}
-                          </div>
+                          </button>
                         </div>
                       </div>
                     </td>
 
-                    {/* Gender (Unboxed clean text) */}
+                    {/* Gender */}
                     <td className="px-3 py-3 whitespace-nowrap text-slate-700">
                       {member.gender}
                     </td>
@@ -359,9 +630,23 @@ export function MemberTable({
 
                     {/* Role / Category */}
                     <td className="px-3 py-3 text-slate-700">
-                      <span className="block max-w-[180px] truncate">
+                      <span className="block max-w-[160px] truncate">
                         {member.role}
                       </span>
+                    </td>
+
+                    {/* Current Address */}
+                    <td className="px-3 py-3 text-slate-600">
+                      {member.address?.fullAddress ? (
+                        <span
+                          title={member.address.fullAddress}
+                          className="block max-w-[230px] truncate text-xs"
+                        >
+                          {member.address.fullAddress}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
 
                     {/* Join Date */}
@@ -369,9 +654,19 @@ export function MemberTable({
                       {member.joinDate}
                     </td>
 
-                    {/* Row Actions */}
+                    {/* Row Actions: Edit, Resend Telegram, Delete */}
                     <td className="py-3 pl-3 pr-5 text-right whitespace-nowrap">
                       <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onEditMember(member)}
+                          aria-label={`កែប្រែ ${member.fullName}`}
+                          className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-[#0F4C5C]/40 hover:bg-slate-50 hover:text-[#0F4C5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap"
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                          កែប្រែ
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => onResendTelegram(member)}
@@ -449,7 +744,7 @@ export function MemberTable({
         </div>
       )}
 
-      {/* Custom Delete Confirmation Modal (avoids window.confirm in iframe) */}
+      {/* Single Delete Confirmation Modal */}
       {confirmDeleteMember && (
         <div
           role="dialog"
@@ -491,6 +786,118 @@ export function MemberTable({
                 លុបចេញ
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {isConfirmBulkDeleteOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-delete-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => setIsConfirmBulkDeleteOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="bulk-delete-title"
+              className="text-base font-semibold text-slate-900"
+            >
+              បញ្ជាក់ការលុបទិន្នន័យច្រើន
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              តើអ្នកពិតជាចង់លុបសមាជិកដែលបានជ្រើសរើសទាំង{' '}
+              <span className="font-mono font-semibold tabular-nums text-slate-900">
+                {validSelectedIds.length}
+              </span>{' '}
+              នាក់ចេញមែនទេ?
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsConfirmBulkDeleteOpen(false)}
+                className="min-h-[38px] rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              >
+                បោះបង់
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBulkDelete}
+                className="min-h-[38px] rounded-lg bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700 whitespace-nowrap"
+              >
+                លុប {validSelectedIds.length} នាក់
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Role Update Modal */}
+      {isBulkRoleModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-role-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => setIsBulkRoleModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="bulk-role-title"
+              className="text-base font-semibold text-slate-900"
+            >
+              ប្តូរតួនាទី / ប្រភេទភ្ញៀវរួម
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              អនុវត្តលើសមាជិកដែលបានជ្រើសរើសចំនួន{' '}
+              <span className="font-mono font-semibold tabular-nums">
+                {validSelectedIds.length}
+              </span>{' '}
+              នាក់
+            </p>
+
+            <form onSubmit={handleSubmitBulkRole} className="mt-4 space-y-4">
+              <div>
+                <label
+                  htmlFor="bulk-role-input"
+                  className="block text-xs font-medium text-slate-700"
+                >
+                  តួនាទី / ប្រភេទភ្ញៀវថ្មី
+                </label>
+                <input
+                  id="bulk-role-input"
+                  type="text"
+                  required
+                  value={bulkRoleValue}
+                  onChange={(e) => setBulkRoleValue(e.target.value)}
+                  placeholder="ឧ. ភ្ញៀវកិត្តិយស ឬ សមាជិកផ្លូវការ"
+                  className="mt-1.5 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkRoleModalOpen(false)}
+                  className="min-h-[38px] rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  type="submit"
+                  className="min-h-[38px] rounded-lg bg-[#0F4C5C] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#0B3B49] whitespace-nowrap"
+                >
+                  រក្សាទុក
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

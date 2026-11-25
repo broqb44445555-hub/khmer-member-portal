@@ -19,7 +19,10 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-export function formatKhmerMemberCaption(member: Member): string {
+export function formatKhmerMemberCaption(
+  member: Member,
+  headerTitle = 'ចុះឈ្មោះសមាជិក / ភ្ញៀវថ្មី'
+): string {
   const tgDisplay = member.telegram
     ? escapeHtml(
         member.telegram.startsWith('@')
@@ -28,14 +31,19 @@ export function formatKhmerMemberCaption(member: Member): string {
       )
     : 'មិនមាន';
 
+  const addressDisplay = member.address?.fullAddress
+    ? escapeHtml(member.address.fullAddress)
+    : 'មិនបានបញ្ជាក់';
+
   return [
-    '<b>ចុះឈ្មោះសមាជិក / ភ្ញៀវថ្មី</b>',
+    `<b>${escapeHtml(headerTitle)}</b>`,
     '────────────────────',
     `<b>ឈ្មោះពេញ៖</b> ${escapeHtml(member.fullName)}`,
     `<b>ភេទ៖</b> ${escapeHtml(member.gender)}`,
     `<b>លេខទូរសព្ទ៖</b> ${escapeHtml(member.phone)}`,
     `<b>Telegram៖</b> ${tgDisplay}`,
     `<b>តួនាទី / ប្រភេទភ្ញៀវ៖</b> ${escapeHtml(member.role)}`,
+    `<b>ទីកន្លែងបច្ចុប្បន្ន៖</b> ${addressDisplay}`,
     `<b>កាលបរិច្ឆេទ៖</b> ${escapeHtml(member.joinDate)}`,
   ].join('\n');
 }
@@ -160,9 +168,10 @@ async function sendSingleChatText(
  */
 export async function sendMemberToTelegram(
   member: Member,
-  photoBlob?: Blob | null
+  photoBlob?: Blob | null,
+  headerTitle?: string
 ): Promise<TelegramSendResult> {
-  const caption = formatKhmerMemberCaption(member);
+  const caption = formatKhmerMemberCaption(member, headerTitle);
   const resolvedBlob =
     photoBlob ?? (member.photoDataUrl ? dataUrlToBlob(member.photoDataUrl) : null);
 

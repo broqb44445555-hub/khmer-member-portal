@@ -87,6 +87,11 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
                 {member.phone}
                 {member.telegram ? ` · ${member.telegram}` : ''}
               </p>
+              {member.address?.fullAddress && (
+                <p className="text-xs text-slate-600">
+                  {member.address.fullAddress}
+                </p>
+              )}
               <p className="font-mono text-xs tabular-nums text-slate-500">
                 កាលបរិច្ឆេទ៖ {member.joinDate}
               </p>

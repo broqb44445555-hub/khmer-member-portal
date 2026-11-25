@@ -1,8 +1,18 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Loader2, Send, Trash2, Upload, User } from 'lucide-react';
-import type { CompressedImageResult, Gender, Member } from '../types/member';
+import {
+  createEmptyAddress,
+  formatFullKhmerAddress,
+} from '../data/battambangAddress';
+import type {
+  CompressedImageResult,
+  Gender,
+  Member,
+  MemberAddress,
+} from '../types/member';
 import { compressImageFile } from '../utils/imageCompression';
 import { createMemberId, getTodayLocalDate } from '../utils/storage';
+import { AddressSelector } from './AddressSelector';
 
 interface RegistrationFormProps {
   onRegister: (member: Member, photoBlob: Blob | null) => Promise<void>;
@@ -26,6 +36,9 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
   const [telegram, setTelegram] = useState('');
   const [role, setRole] = useState('');
   const [joinDate, setJoinDate] = useState(getTodayLocalDate());
+  const [address, setAddress] = useState<MemberAddress>(() =>
+    createEmptyAddress()
+  );
 
   const [compressedPhoto, setCompressedPhoto] =
     useState<CompressedImageResult | null>(null);
@@ -68,9 +81,18 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
     const trimmedPhone = phone.trim();
     const trimmedRole = role.trim();
     const trimmedTelegram = telegram.trim();
+    const cleanProvince = address.province.trim();
+    const cleanDistrict = address.district.trim();
+    const cleanCommune = address.commune.trim();
+    const cleanVillage = address.village.trim();
 
     if (!trimmedName || !trimmedPhone || !trimmedRole) {
       onError('សូមបំពេញព័ត៌មានចាំបាច់ទាំងអស់ (ឈ្មោះពេញ លេខទូរសព្ទ និងតួនាទី)។');
+      return;
+    }
+
+    if (!cleanProvince || !cleanDistrict || !cleanCommune) {
+      onError('សូមជ្រើសរើស ឬបំពេញទីកន្លែងបច្ចុប្បន្ន (ខេត្ត ស្រុក/ក្រុង និងឃុំ/សង្កាត់)។');
       return;
     }
 
@@ -80,6 +102,19 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
         : `@${trimmedTelegram}`
       : '';
 
+    const normalizedAddress: MemberAddress = {
+      province: cleanProvince,
+      district: cleanDistrict,
+      commune: cleanCommune,
+      village: cleanVillage,
+      fullAddress: formatFullKhmerAddress({
+        province: cleanProvince,
+        district: cleanDistrict,
+        commune: cleanCommune,
+        village: cleanVillage,
+      }),
+    };
+
     const newMember: Member = {
       id: createMemberId(),
       fullName: trimmedName,
@@ -88,6 +123,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
       telegram: formattedTelegram,
       role: trimmedRole,
       joinDate: joinDate || getTodayLocalDate(),
+      address: normalizedAddress,
       photoDataUrl: compressedPhoto?.dataUrl,
       createdAt: new Date().toISOString(),
     };
@@ -103,6 +139,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
       setTelegram('');
       setRole('');
       setJoinDate(getTodayLocalDate());
+      setAddress(createEmptyAddress());
       setCompressedPhoto(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -317,6 +354,14 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
             ))}
           </datalist>
         </div>
+
+        {/* Current Address Cascading Selector */}
+        <AddressSelector
+          value={address}
+          onChange={setAddress}
+          required
+          idPrefix="reg-addr"
+        />
 
         {/* Join Date */}
         <div>

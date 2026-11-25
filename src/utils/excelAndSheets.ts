@@ -1,5 +1,10 @@
 import * as XLSX from 'xlsx';
-import type { Gender, Member } from '../types/member';
+import {
+  BATTAMBANG_DISTRICTS,
+  DEFAULT_PROVINCE,
+  formatFullKhmerAddress,
+} from '../data/battambangAddress';
+import type { Gender, Member, MemberAddress } from '../types/member';
 import { createMemberId, getTodayLocalDate } from './storage';
 
 const KHMER_HEADERS = [
@@ -9,6 +14,7 @@ const KHMER_HEADERS = [
   'លេខទូរសព្ទ',
   'Telegram',
   'តួនាទី / ប្រភេទភ្ញៀវ',
+  'ទីកន្លែងបច្ចុប្បន្ន',
   'កាលបរិច្ឆេទ',
 ] as const;
 
@@ -170,6 +176,46 @@ export async function importMembersFromExcel(file: File): Promise<Member[]> {
       }
     }
 
+    const addressFullRaw = pickCellValue(row, [
+      'ទីកន្លែងបច្ចុប្បន្ន',
+      'អាសយដ្ឋាន',
+      'address',
+      'currentaddress',
+    ]);
+    const provinceRaw = pickCellValue(row, ['ខេត្ត', 'រាជធានី', 'province']);
+    const districtRaw = pickCellValue(row, ['ស្រុក', 'ក្រុង', 'district']);
+    const communeRaw = pickCellValue(row, ['ឃុំ', 'សង្កាត់', 'commune']);
+    const villageRaw = pickCellValue(row, ['ភូមិ', 'village']);
+
+    let parsedAddress: MemberAddress | undefined;
+    if (provinceRaw || districtRaw || communeRaw || villageRaw) {
+      const province = provinceRaw || DEFAULT_PROVINCE;
+      parsedAddress = {
+        province,
+        district: districtRaw,
+        commune: communeRaw,
+        village: villageRaw,
+        fullAddress: formatFullKhmerAddress({
+          province,
+          district: districtRaw,
+          commune: communeRaw,
+          village: villageRaw,
+        }),
+      };
+    } else if (addressFullRaw) {
+      const matchedDistrict =
+        BATTAMBANG_DISTRICTS.find((d) => addressFullRaw.includes(d)) || '';
+      parsedAddress = {
+        province: addressFullRaw.includes(DEFAULT_PROVINCE)
+          ? DEFAULT_PROVINCE
+          : '',
+        district: matchedDistrict,
+        commune: '',
+        village: '',
+        fullAddress: addressFullRaw,
+      };
+    }
+
     imported.push({
       id: createMemberId(),
       fullName: fullName || 'មិនមានឈ្មោះ',
@@ -178,6 +224,7 @@ export async function importMembersFromExcel(file: File): Promise<Member[]> {
       telegram: normalizeTelegram(telegramRaw),
       role: roleRaw || 'សមាជិក',
       joinDate: parseExcelDate(rawDateVal),
+      address: parsedAddress,
       createdAt: nowIso,
       telegramSent: false,
     });
@@ -203,6 +250,7 @@ export function exportMembersToExcel(members: Member[]): void {
     'លេខទូរសព្ទ': m.phone,
     Telegram: m.telegram || '',
     'តួនាទី / ប្រភេទភ្ញៀវ': m.role,
+    'ទីកន្លែងបច្ចុប្បន្ន': m.address?.fullAddress || '',
     'កាលបរិច្ឆេទ': m.joinDate,
   }));
 
@@ -216,7 +264,8 @@ export function exportMembersToExcel(members: Member[]): void {
     { wch: 10 },
     { wch: 18 },
     { wch: 20 },
-    { wch: 24 },
+    { wch: 22 },
+    { wch: 42 },
     { wch: 15 },
   ];
 
@@ -247,6 +296,7 @@ export async function copyMembersForGoogleSheets(
       sanitizeTsvCell(m.phone),
       sanitizeTsvCell(m.telegram || ''),
       sanitizeTsvCell(m.role),
+      sanitizeTsvCell(m.address?.fullAddress || ''),
       sanitizeTsvCell(m.joinDate),
     ].join('\t')
   );
@@ -277,4 +327,149 @@ export async function copyMembersForGoogleSheets(
   } catch {
     return false;
   }
+}
+
+/**
+ * Downloads a clean Excel (.xlsx) template with Khmer column headers and one sample row.
+ */
+export function downloadExcelTemplate(): void {
+  const sampleRow = [
+    {
+      'ល.រ': 1,
+      'ឈ្មោះពេញ': 'សុខ ដារ៉ា',
+      'ភេទ': 'ប្រុស',
+      'លេខទូរសព្ទ': '012 345 678',
+      Telegram: '@sokdara',
+      'តួនាទី / ប្រភេទភ្ញៀវ': 'សមាជិកថ្មី',
+      'ទីកន្លែងបច្ចុប្បន្ន': 'ភូមិ ដីក្រហម, ឃុំកំរៀង, ស្រុកកំរៀង, ខេត្តបាត់ដំបង',
+      'កាលបរិច្ឆេទ': getTodayLocalDate(),
+    },
+  ];
+
+  const worksheet = XLSX.utils.json_to_sheet(sampleRow, {
+    header: [...KHMER_HEADERS],
+  });
+
+  worksheet['!cols'] = [
+    { wch: 6 },
+    { wch: 24 },
+    { wch: 10 },
+    { wch: 18 },
+    { wch: 20 },
+    { wch: 22 },
+    { wch: 42 },
+    { wch: 15 },
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'គំរូសមាជិក');
+  XLSX.writeFile(workbook, 'members-template.xlsx');
+}
+
+/**
+ * Exports full member data (including compressed base64 photos) as a JSON backup file.
+ */
+export function exportMembersBackupJson(members: Member[]): void {
+  const payload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    count: members.length,
+    members,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `members-backup-${getTodayLocalDate()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Parses and validates a JSON backup file into Member records.
+ */
+export async function parseMembersBackupJson(file: File): Promise<Member[]> {
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('ឯកសារ JSON មិនត្រឹមត្រូវ ឬខូចទ្រង់ទ្រាយ។');
+  }
+
+  const rawList = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' &&
+        parsed !== null &&
+        Array.isArray((parsed as { members?: unknown }).members)
+      ? (parsed as { members: unknown[] }).members
+      : null;
+
+  if (!rawList) {
+    throw new Error('រកមិនឃើញបញ្ជីទិន្នន័យសមាជិកក្នុងឯកសារបម្រុងទុកនេះទេ។');
+  }
+
+  const nowIso = new Date().toISOString();
+  const validMembers: Member[] = [];
+
+  for (const item of rawList) {
+    if (typeof item !== 'object' || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    const fullName = String(obj.fullName ?? '').trim();
+    const phone = String(obj.phone ?? '').trim();
+    if (!fullName && !phone) continue;
+
+    const rawAddr = obj.address as Record<string, unknown> | undefined;
+    const restoredAddress: MemberAddress | undefined =
+      rawAddr && typeof rawAddr === 'object'
+        ? {
+            province: String(rawAddr.province ?? ''),
+            district: String(rawAddr.district ?? ''),
+            commune: String(rawAddr.commune ?? ''),
+            village: String(rawAddr.village ?? ''),
+            fullAddress:
+              String(rawAddr.fullAddress ?? '').trim() ||
+              formatFullKhmerAddress({
+                province: String(rawAddr.province ?? ''),
+                district: String(rawAddr.district ?? ''),
+                commune: String(rawAddr.commune ?? ''),
+                village: String(rawAddr.village ?? ''),
+              }),
+          }
+        : undefined;
+
+    validMembers.push({
+      id:
+        typeof obj.id === 'string' && obj.id.trim()
+          ? obj.id.trim()
+          : createMemberId(),
+      fullName: fullName || 'មិនមានឈ្មោះ',
+      gender: parseGender(String(obj.gender ?? 'ប្រុស')),
+      phone: phone || '—',
+      telegram: normalizeTelegram(String(obj.telegram ?? '')),
+      role: String(obj.role ?? 'សមាជិក').trim() || 'សមាជិក',
+      joinDate: parseExcelDate(obj.joinDate),
+      address: restoredAddress,
+      photoDataUrl:
+        typeof obj.photoDataUrl === 'string' &&
+        obj.photoDataUrl.startsWith('data:image/')
+          ? obj.photoDataUrl
+          : undefined,
+      createdAt:
+        typeof obj.createdAt === 'string' && obj.createdAt
+          ? obj.createdAt
+          : nowIso,
+      telegramSent: Boolean(obj.telegramSent),
+    });
+  }
+
+  if (validMembers.length === 0) {
+    throw new Error('មិនមានទិន្នន័យសមាជិកត្រឹមត្រូវក្នុងឯកសារបម្រុងទុកនេះទេ។');
+  }
+
+  return validMembers;
 }
