@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Lock, X } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Lock, X } from 'lucide-react';
 
 interface AdminPasscodeModalProps {
   isOpen: boolean;
@@ -13,12 +13,14 @@ export function AdminPasscodeModal({
   onVerify,
 }: AdminPasscodeModalProps) {
   const [passcode, setPasscode] = useState('');
+  const [showPasscode, setShowPasscode] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setPasscode('');
+      setShowPasscode(false);
       setErrorMessage('');
       window.setTimeout(() => {
         inputRef.current?.focus();
@@ -30,9 +32,9 @@ export function AdminPasscodeModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = onVerify(passcode.trim());
+    const ok = onVerify(passcode);
     if (!ok) {
-      setErrorMessage('លេខកូដសម្ងាត់មិនត្រឹមត្រូវទេ។ សូមព្យាយាមម្តងទៀត។');
+      setErrorMessage('លេខកូដសម្ងាត់មិនត្រឹមត្រូវ សូមព្យាយាមម្តងទៀត!');
       setPasscode('');
       inputRef.current?.focus();
     }
@@ -86,21 +88,39 @@ export function AdminPasscodeModal({
             >
               លេខកូដសម្ងាត់ (Passcode)
             </label>
-            <input
-              ref={inputRef}
-              id="admin-passcode-input"
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              required
-              value={passcode}
-              onChange={(e) => {
-                setPasscode(e.target.value);
-                if (errorMessage) setErrorMessage('');
-              }}
-              placeholder="••••"
-              className="mt-1.5 block min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-center font-mono text-lg tracking-[0.35em] text-slate-900 placeholder:tracking-[0.25em] placeholder:text-slate-400 transition-colors focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
-            />
+            <div className="relative mt-1.5">
+              <input
+                ref={inputRef}
+                id="admin-passcode-input"
+                type={showPasscode ? 'text' : 'password'}
+                autoComplete="current-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                required
+                value={passcode}
+                onChange={(e) => {
+                  setPasscode(e.target.value);
+                  if (errorMessage) setErrorMessage('');
+                }}
+                placeholder="បញ្ចូលលេខកូដសម្ងាត់ Admin..."
+                className="block min-h-[44px] w-full rounded-lg border border-slate-300 bg-white py-2 pl-3.5 pr-11 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-[#0F4C5C] focus:outline-none focus:ring-2 focus:ring-[#0F4C5C]/20"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPasscode((prev) => !prev)}
+                aria-label={
+                  showPasscode ? 'លាក់លេខកូដសម្ងាត់' : 'បង្ហាញលេខកូដសម្ងាត់'
+                }
+                className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C]"
+              >
+                {showPasscode ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </div>
 
           {errorMessage && (

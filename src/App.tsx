@@ -27,7 +27,7 @@ import {
   sendMemberToTelegram,
 } from './utils/telegram';
 
-const ADMIN_PASSCODE = '1234';
+const ADMIN_PASSCODE = 'pheak9999';
 
 type AdminTab = 'manage' | 'register' | 'backup';
 
