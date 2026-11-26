@@ -272,3 +272,83 @@ export function createEmptyAddress(): MemberAddress {
     fullAddress: DEFAULT_PROVINCE,
   };
 }
+
+/**
+ * Parses a saved Khmer full address string (from Google Sheets) back into structured
+ * Province, District, Commune, and Village fields so District filters and Edit dropdowns work accurately.
+ */
+export function parseFullKhmerAddress(raw: string): MemberAddress | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const parts = trimmed
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  let province = '';
+  let district = '';
+  let commune = '';
+  let village = '';
+
+  // Detect known Battambang province & district directly first
+  if (trimmed.includes(DEFAULT_PROVINCE)) {
+    province = DEFAULT_PROVINCE;
+  }
+
+  for (const d of BATTAMBANG_DISTRICTS) {
+    if (trimmed.includes(d)) {
+      district = d;
+      if (!province) province = DEFAULT_PROVINCE;
+      break;
+    }
+  }
+
+  if (district && BATTAMBANG_COMMUNES_BY_DISTRICT[district]) {
+    for (const c of BATTAMBANG_COMMUNES_BY_DISTRICT[district]) {
+      if (trimmed.includes(c)) {
+        commune = c;
+        break;
+      }
+    }
+  }
+
+  // Parse remaining parts by prefix or positional order
+  for (const part of parts) {
+    if (!village && part.startsWith('ភូមិ')) {
+      village = part;
+    } else if (
+      !commune &&
+      (part.startsWith('ឃុំ') || part.startsWith('សង្កាត់'))
+    ) {
+      commune = part.replace(/^ឃុំ\/សង្កាត់\s*/, '');
+    } else if (
+      !district &&
+      (part.startsWith('ស្រុក') ||
+        part.startsWith('ក្រុង') ||
+        part.startsWith('ខណ្ឌ'))
+    ) {
+      district = part.replace(/^ស្រុក\/ក្រុង\s*/, '');
+    } else if (
+      !province &&
+      (part.startsWith('ខេត្ត') || part.startsWith('រាជធានី'))
+    ) {
+      province = part;
+    }
+  }
+
+  if (!province && parts.length >= 1) {
+    const last = parts[parts.length - 1];
+    if (last !== village && last !== commune && last !== district) {
+      province = last;
+    }
+  }
+
+  return {
+    province,
+    district,
+    commune,
+    village,
+    fullAddress: trimmed,
+  };
+}

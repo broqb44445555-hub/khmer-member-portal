@@ -1,11 +1,64 @@
 import type { CompressedImageResult } from '../types/member';
 
-const MAX_WIDTH = 600;
-const JPEG_QUALITY = 0.7;
+const SHEET_THUMB_MAX_WIDTH = 150;
+const SHEET_THUMB_QUALITY = 0.5;
+
+const TELEGRAM_MAX_WIDTH = 600;
+const TELEGRAM_QUALITY = 0.7;
+
+function renderCanvas(
+  img: HTMLImageElement,
+  maxWidth: number,
+  quality: number
+): Promise<{ dataUrl: string; blob: Blob; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    let targetWidth = img.naturalWidth || img.width;
+    let targetHeight = img.naturalHeight || img.height;
+
+    if (targetWidth > maxWidth) {
+      const ratio = maxWidth / targetWidth;
+      targetWidth = maxWidth;
+      targetHeight = Math.max(1, Math.round(targetHeight * ratio));
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      reject(new Error('កម្មវិធីរុករកមិនគាំទ្រការបង្ហាប់រូបភាពទេ។'));
+      return;
+    }
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, targetWidth, targetHeight);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+    canvas.toBlob(
+      (blob) => {
+        const resolvedBlob = blob ?? dataUrlToBlob(dataUrl);
+        resolve({
+          dataUrl,
+          blob: resolvedBlob,
+          width: targetWidth,
+          height: targetHeight,
+        });
+      },
+      'image/jpeg',
+      quality
+    );
+  });
+}
 
 /**
- * Compresses and resizes an uploaded image file client-side using HTML5 Canvas.
- * Ensures width <= 600px (preserving aspect ratio) and outputs JPEG at quality 0.7.
+ * Compresses an uploaded image file client-side:
+ * - Small base64 JPEG thumbnail (max width 150px, quality 0.5) for saving cleanly into Google Sheets.
+ * - Crisp JPEG Blob (max width 600px, quality 0.7) for sending directly to Telegram via sendPhoto.
  */
 export function compressImageFile(file: File): Promise<CompressedImageResult> {
   return new Promise((resolve, reject) => {
@@ -27,59 +80,23 @@ export function compressImageFile(file: File): Promise<CompressedImageResult> {
         reject(new Error('រូបភាពមិនត្រឹមត្រូវ ឬមិនអាចបើកបានទេ។'));
       };
 
-      img.onload = () => {
-        let targetWidth = img.naturalWidth || img.width;
-        let targetHeight = img.naturalHeight || img.height;
+      img.onload = async () => {
+        try {
+          const [sheetThumb, telegramPhoto] = await Promise.all([
+            renderCanvas(img, SHEET_THUMB_MAX_WIDTH, SHEET_THUMB_QUALITY),
+            renderCanvas(img, TELEGRAM_MAX_WIDTH, TELEGRAM_QUALITY),
+          ]);
 
-        if (targetWidth > MAX_WIDTH) {
-          const ratio = MAX_WIDTH / targetWidth;
-          targetWidth = MAX_WIDTH;
-          targetHeight = Math.max(1, Math.round(targetHeight * ratio));
+          resolve({
+            dataUrl: sheetThumb.dataUrl,
+            blob: telegramPhoto.blob,
+            width: sheetThumb.width,
+            height: sheetThumb.height,
+            sizeKB: Math.max(1, Math.round(sheetThumb.blob.size / 1024)),
+          });
+        } catch (err) {
+          reject(err);
         }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('កម្មវិធីរុករកមិនគាំទ្រការបង្ហាប់រូបភាពទេ។'));
-          return;
-        }
-
-        // Fill white background before drawing so transparent PNGs convert cleanly to JPEG
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, targetWidth, targetHeight);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-        const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              const fallbackBlob = dataUrlToBlob(dataUrl);
-              resolve({
-                dataUrl,
-                blob: fallbackBlob,
-                width: targetWidth,
-                height: targetHeight,
-                sizeKB: Math.max(1, Math.round(fallbackBlob.size / 1024)),
-              });
-              return;
-            }
-            resolve({
-              dataUrl,
-              blob,
-              width: targetWidth,
-              height: targetHeight,
-              sizeKB: Math.max(1, Math.round(blob.size / 1024)),
-            });
-          },
-          'image/jpeg',
-          JPEG_QUALITY
-        );
       };
 
       img.src = String(event.target?.result ?? '');
@@ -90,7 +107,7 @@ export function compressImageFile(file: File): Promise<CompressedImageResult> {
 }
 
 /**
- * Converts a base64 data URL (e.g., stored in localStorage) into a Blob for FormData uploads.
+ * Converts a base64 data URL into a Blob for FormData uploads.
  */
 export function dataUrlToBlob(dataUrl: string): Blob {
   const parts = dataUrl.split(',');

@@ -217,7 +217,7 @@ export async function importMembersFromExcel(file: File): Promise<Member[]> {
     }
 
     imported.push({
-      id: createMemberId(),
+      id: createMemberId(imported.length),
       fullName: fullName || 'មិនមានឈ្មោះ',
       gender: parseGender(genderRaw),
       phone: phone || '—',
@@ -274,59 +274,6 @@ export function exportMembersToExcel(members: Member[]): void {
 
   const today = getTodayLocalDate();
   XLSX.writeFile(workbook, `members-registry-${today}.xlsx`);
-}
-
-function sanitizeTsvCell(value: string): string {
-  return value.replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-/**
- * Formats all members as TSV (Tab-Separated Values) and copies to clipboard
- * so users can paste directly into Google Sheets.
- */
-export async function copyMembersForGoogleSheets(
-  members: Member[]
-): Promise<boolean> {
-  const headerLine = KHMER_HEADERS.join('\t');
-  const dataLines = members.map((m, idx) =>
-    [
-      String(idx + 1),
-      sanitizeTsvCell(m.fullName),
-      sanitizeTsvCell(m.gender),
-      sanitizeTsvCell(m.phone),
-      sanitizeTsvCell(m.telegram || ''),
-      sanitizeTsvCell(m.role),
-      sanitizeTsvCell(m.address?.fullAddress || ''),
-      sanitizeTsvCell(m.joinDate),
-    ].join('\t')
-  );
-
-  const tsvText = [headerLine, ...dataLines].join('\n');
-
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(tsvText);
-      return true;
-    }
-  } catch {
-    // Fall back to execCommand below for restricted iframe contexts
-  }
-
-  try {
-    const textarea = document.createElement('textarea');
-    textarea.value = tsvText;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    textarea.style.top = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(textarea);
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 /**

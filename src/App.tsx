@@ -9,7 +9,6 @@ import { SuccessPopupModal, ToastStack } from './components/NotificationModals';
 import { RegistrationForm } from './components/RegistrationForm';
 import type { Member, SuccessModalPayload, ToastNotice } from './types/member';
 import {
-  copyMembersForGoogleSheets,
   downloadExcelTemplate,
   exportMembersBackupJson,
   exportMembersToExcel,
@@ -17,10 +16,12 @@ import {
   parseMembersBackupJson,
 } from './utils/excelAndSheets';
 import {
-  getTodayLocalDate,
-  loadMembersFromStorage,
-  saveMembersToStorage,
-} from './utils/storage';
+  createMemberInDb,
+  deleteMemberInDb,
+  fetchMembersFromDb,
+  updateMemberInDb,
+} from './utils/sheetsDb';
+import { getTodayLocalDate } from './utils/storage';
 import {
   sendBulkImportToTelegram,
   sendMemberToTelegram,
@@ -31,15 +32,18 @@ const ADMIN_PASSCODE = '1234';
 type AdminTab = 'manage' | 'register' | 'backup';
 
 export default function App() {
-  const [members, setMembers] = useState<Member[]>(() =>
-    loadMembersFromStorage()
-  );
+  const [members, setMembers] = useState<Member[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('manage');
   const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
+
   const [successModal, setSuccessModal] = useState<SuccessModalPayload | null>(
     null
   );
@@ -60,80 +64,86 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const refreshMembers = useCallback(
+    async (options?: { silentSuccessToast?: boolean }) => {
+      setIsSyncing(true);
+      setSyncError(null);
+      try {
+        const fetched = await fetchMembersFromDb();
+        setMembers(fetched);
+        if (!options?.silentSuccessToast) {
+          pushToast(
+            'success',
+            `បានទាញទិន្នន័យថ្មីបំផុត (${fetched.length} នាក់) ពី Google Sheets រួចរាល់។`
+          );
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'មិនអាចទាញទិន្នន័យពី Google Sheets បានទេ។';
+        setSyncError(msg);
+        pushToast('error', msg);
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [pushToast]
+  );
+
   const handleVerifyAdminPasscode = useCallback(
     (enteredCode: string): boolean => {
       if (enteredCode === ADMIN_PASSCODE) {
         setIsAdmin(true);
         setActiveAdminTab('manage');
         setIsPasscodeModalOpen(false);
-        pushToast('success', 'បានបើកដំណើរការ Admin Mode ដោយជោគជ័យ។');
+        pushToast('success', 'បានបើកដំណើរការ Admin Mode · កំពុងទាញទិន្នន័យពី Google Sheets...');
+        void refreshMembers({ silentSuccessToast: true });
         return true;
       }
       return false;
     },
-    [pushToast]
+    [pushToast, refreshMembers]
   );
 
   const handleLockAdmin = useCallback(() => {
     setIsAdmin(false);
     setEditingMember(null);
+    setSyncError(null);
     pushToast('info', 'បានចាក់សោ Admin Mode ត្រឡប់ទៅទម្រង់សម្រាប់ភ្ញៀវវិញ។');
   }, [pushToast]);
 
-  const persistMembers = useCallback(
-    (nextMembers: Member[]): boolean => {
-      const result = saveMembersToStorage(nextMembers);
-      if (!result.ok) {
-        pushToast(
-          'error',
-          result.error || 'មិនអាចរក្សាទុកទិន្នន័យក្នុង localStorage បានទេ។'
-        );
-        return false;
-      }
-      setMembers(nextMembers);
-      return true;
-    },
-    [pushToast]
-  );
-
   const handleRegisterMember = useCallback(
     async (newMember: Member, photoBlob: Blob | null) => {
-      const telegramResult = await sendMemberToTelegram(newMember, photoBlob);
+      const [dbResult, telegramResult] = await Promise.all([
+        createMemberInDb(newMember),
+        sendMemberToTelegram(newMember, photoBlob),
+      ]);
 
       const savedMember: Member = {
         ...newMember,
         telegramSent: telegramResult.ok,
       };
 
-      const nextList = [savedMember, ...members];
-      const saved = persistMembers(nextList);
-
-      if (!saved) {
-        // Fallback: retry saving without photo if localStorage quota exceeded
-        const withoutPhoto: Member = {
-          ...savedMember,
-          photoDataUrl: undefined,
-        };
-        const retrySaved = persistMembers([withoutPhoto, ...members]);
-        if (retrySaved) {
-          pushToast(
-            'info',
-            'បានរក្សាទុកព័ត៌មានសមាជិកដោយមិនរួមបញ្ចូលរូបភាព ដោយសារទំហំផ្ទុកក្នុងកម្មវិធីរុករកជិតពេញ។'
-          );
-        }
+      if (isAdmin && dbResult.ok) {
+        await refreshMembers({ silentSuccessToast: true });
       }
 
       setSuccessModal({
-        title: 'ចុះឈ្មោះសមាជិកបានជោគជ័យ',
+        title: dbResult.ok
+          ? 'ចុះឈ្មោះសមាជិកបានជោគជ័យ'
+          : 'បានផ្ញើទិន្នន័យសមាជិក',
         subtitle: savedMember.photoDataUrl
           ? 'រួមបញ្ចូលទាំងរូបភាព និងព័ត៌មានលម្អិត'
-          : 'ព័ត៌មានសមាជិកត្រូវបានរក្សាទុកក្នុងបញ្ជី',
+          : 'ព័ត៌មានសមាជិក និងការជូនដំណឹង',
         member: savedMember,
+        dbSaved: dbResult.ok,
+        dbError: dbResult.error,
         telegramSent: telegramResult.ok,
         telegramError: telegramResult.error,
       });
     },
-    [members, persistMembers, pushToast]
+    [isAdmin, refreshMembers]
   );
 
   const handleUpdateMember = useCallback(
@@ -141,87 +151,140 @@ export default function App() {
       updatedMember: Member,
       options: { photoBlob: Blob | null; notifyTelegram: boolean }
     ) => {
-      const nextList = members.map((m) =>
-        m.id === updatedMember.id ? updatedMember : m
-      );
-
-      if (!persistMembers(nextList)) {
-        return;
-      }
-
-      setEditingMember(null);
-
-      if (options.notifyTelegram) {
-        const tgResult = await sendMemberToTelegram(
-          updatedMember,
-          options.photoBlob,
-          'កែប្រែព័ត៌មានសមាជិក / ភ្ញៀវ'
-        );
-        if (tgResult.ok) {
-          pushToast(
-            'success',
-            `បានកែប្រែ «${updatedMember.fullName}» និងផ្ញើទៅ Telegram ដោយជោគជ័យ។`
-          );
-        } else {
+      setIsMutating(true);
+      try {
+        const dbResult = await updateMemberInDb(updatedMember);
+        if (!dbResult.ok) {
           pushToast(
             'error',
-            `បានកែប្រែទិន្នន័យ ប៉ុន្តែមិនអាចផ្ញើទៅ Telegram បានទេ៖ ${tgResult.error || 'កំហុសបណ្តាញ'}`
+            `មិនអាចកែប្រែទិន្នន័យលើ Google Sheets បានទេ៖ ${dbResult.error || 'កំហុសបណ្តាញ'}`
+          );
+          return;
+        }
+
+        setEditingMember(null);
+
+        if (options.notifyTelegram) {
+          const tgResult = await sendMemberToTelegram(
+            updatedMember,
+            options.photoBlob,
+            'កែប្រែព័ត៌មានសមាជិក / ភ្ញៀវ'
+          );
+          if (tgResult.ok) {
+            pushToast(
+              'success',
+              `បានកែប្រែ «${updatedMember.fullName}» និងផ្ញើទៅ Telegram ដោយជោគជ័យ។`
+            );
+          } else {
+            pushToast(
+              'error',
+              `បានកែប្រែលើ Google Sheets ប៉ុន្តែមិនអាចផ្ញើទៅ Telegram បានទេ៖ ${tgResult.error || 'កំហុសបណ្តាញ'}`
+            );
+          }
+        } else {
+          pushToast(
+            'success',
+            `បានរក្សាទុកការកែប្រែ «${updatedMember.fullName}» លើ Google Sheets ដោយជោគជ័យ។`
           );
         }
-      } else {
-        pushToast(
-          'success',
-          `បានរក្សាទុកការកែប្រែ «${updatedMember.fullName}» ដោយជោគជ័យ។`
-        );
+
+        await refreshMembers({ silentSuccessToast: true });
+      } finally {
+        setIsMutating(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [pushToast, refreshMembers]
   );
 
   const handleDeleteMember = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const target = members.find((m) => m.id === id);
-      const nextList = members.filter((m) => m.id !== id);
-      if (persistMembers(nextList)) {
+      setIsMutating(true);
+      try {
+        const dbResult = await deleteMemberInDb(id);
+        if (!dbResult.ok) {
+          pushToast(
+            'error',
+            `មិនអាចលុបទិន្នន័យលើ Google Sheets បានទេ៖ ${dbResult.error || 'កំហុសបណ្តាញ'}`
+          );
+          return;
+        }
+
         pushToast(
           'success',
           target
-            ? `បានលុប «${target.fullName}» ចេញពីបញ្ជីរួចរាល់។`
+            ? `បានលុប «${target.fullName}» ចេញពី Google Sheets រួចរាល់។`
             : 'បានលុបទិន្នន័យសមាជិករួចរាល់។'
         );
+
+        await refreshMembers({ silentSuccessToast: true });
+      } finally {
+        setIsMutating(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [members, pushToast, refreshMembers]
   );
 
   const handleBulkDeleteMembers = useCallback(
-    (ids: string[]) => {
-      const idSet = new Set(ids);
-      const nextList = members.filter((m) => !idSet.has(m.id));
-      if (persistMembers(nextList)) {
-        pushToast(
-          'success',
-          `បានលុបទិន្នន័យសមាជិកចំនួន ${ids.length} នាក់រួចរាល់។`
-        );
+    async (ids: string[]) => {
+      setIsMutating(true);
+      try {
+        let deletedCount = 0;
+        for (const id of ids) {
+          const res = await deleteMemberInDb(id);
+          if (res.ok) deletedCount += 1;
+        }
+
+        if (deletedCount === ids.length) {
+          pushToast(
+            'success',
+            `បានលុបទិន្នន័យសមាជិកចំនួន ${deletedCount} នាក់ចេញពី Google Sheets រួចរាល់។`
+          );
+        } else if (deletedCount > 0) {
+          pushToast(
+            'info',
+            `បានលុប ${deletedCount}/${ids.length} នាក់។ សូមពិនិត្យបញ្ជីម្តងទៀត។`
+          );
+        } else {
+          pushToast('error', 'មិនអាចលុបទិន្នន័យដែលបានជ្រើសលើ Google Sheets បានទេ។');
+        }
+
+        await refreshMembers({ silentSuccessToast: true });
+      } finally {
+        setIsMutating(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [pushToast, refreshMembers]
   );
 
   const handleBulkUpdateRole = useCallback(
-    (ids: string[], newRole: string) => {
+    async (ids: string[], newRole: string) => {
       const idSet = new Set(ids);
-      const nextList = members.map((m) =>
-        idSet.has(m.id) ? { ...m, role: newRole } : m
-      );
-      if (persistMembers(nextList)) {
-        pushToast(
-          'success',
-          `បានប្តូរតួនាទីសមាជិកចំនួន ${ids.length} នាក់ទៅជា «${newRole}» រួចរាល់។`
-        );
+      const targets = members.filter((m) => idSet.has(m.id));
+      if (targets.length === 0) return;
+
+      setIsMutating(true);
+      try {
+        let updatedCount = 0;
+        for (const member of targets) {
+          const res = await updateMemberInDb({ ...member, role: newRole });
+          if (res.ok) updatedCount += 1;
+        }
+
+        if (updatedCount > 0) {
+          pushToast(
+            'success',
+            `បានប្តូរតួនាទីសមាជិកចំនួន ${updatedCount} នាក់ទៅជា «${newRole}» លើ Google Sheets រួចរាល់។`
+          );
+          await refreshMembers({ silentSuccessToast: true });
+        } else {
+          pushToast('error', 'មិនអាចប្តូរតួនាទីលើ Google Sheets បានទេ។');
+        }
+      } finally {
+        setIsMutating(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [members, pushToast, refreshMembers]
   );
 
   const handleResendTelegram = useCallback(
@@ -230,10 +293,6 @@ export default function App() {
       try {
         const result = await sendMemberToTelegram(member);
         if (result.ok) {
-          const updated = members.map((m) =>
-            m.id === member.id ? { ...m, telegramSent: true } : m
-          );
-          persistMembers(updated);
           pushToast(
             'success',
             `បានផ្ញើព័ត៌មាន «${member.fullName}» ទៅ Telegram ដោយជោគជ័យ។`
@@ -248,7 +307,7 @@ export default function App() {
         setResendingId(null);
       }
     },
-    [members, persistMembers, pushToast]
+    [pushToast]
   );
 
   const handleImportExcel = useCallback(
@@ -256,23 +315,31 @@ export default function App() {
       setIsImporting(true);
       try {
         const importedMembers = await importMembersFromExcel(file);
+
+        let savedCount = 0;
+        let lastError: string | undefined;
+        for (const member of importedMembers) {
+          const res = await createMemberInDb(member);
+          if (res.ok) savedCount += 1;
+          else lastError = res.error;
+        }
+
         const telegramResult = await sendBulkImportToTelegram(
           importedMembers,
           file.name
         );
 
-        const markedImported = importedMembers.map((m) => ({
-          ...m,
-          telegramSent: telegramResult.ok,
-        }));
-
-        const nextList = [...markedImported, ...members];
-        persistMembers(nextList);
+        await refreshMembers({ silentSuccessToast: true });
 
         setSuccessModal({
           title: 'នាំចូលឯកសារ Excel បានជោគជ័យ',
           subtitle: file.name,
-          importedCount: importedMembers.length,
+          importedCount: savedCount,
+          dbSaved: savedCount > 0,
+          dbError:
+            savedCount < importedMembers.length
+              ? `រក្សាទុកបាន ${savedCount}/${importedMembers.length} (${lastError || 'កំហុស'})`
+              : undefined,
           telegramSent: telegramResult.ok,
           telegramError: telegramResult.error,
         });
@@ -287,7 +354,7 @@ export default function App() {
         setIsImporting(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [pushToast, refreshMembers]
   );
 
   const handleExportExcel = useCallback(
@@ -310,25 +377,6 @@ export default function App() {
     [members, pushToast]
   );
 
-  const handleCopyGoogleSheets = useCallback(async () => {
-    if (members.length === 0) {
-      pushToast('info', 'មិនមានទិន្នន័យសមាជិកសម្រាប់ចម្លងទេ។');
-      return;
-    }
-    const ok = await copyMembersForGoogleSheets(members);
-    if (ok) {
-      pushToast(
-        'success',
-        'បានចម្លងទិន្នន័យរួចរាល់! សូមបើក Google Sheets រួចចុច Ctrl+V (ឬ Cmd+V) ដើម្បីបិទភ្ជាប់។'
-      );
-    } else {
-      pushToast(
-        'error',
-        'មិនអាចចម្លងទៅ Clipboard បានទេ។ សូមសាកល្បងម្តងទៀត ឬប្រើការនាំចេញ Excel។'
-      );
-    }
-  }, [members, pushToast]);
-
   const handleExportBackupJson = useCallback(() => {
     if (members.length === 0) {
       pushToast('info', 'មិនមានទិន្នន័យសម្រាប់បម្រុងទុកទេ។');
@@ -343,28 +391,39 @@ export default function App() {
 
   const handleImportBackupJson = useCallback(
     async (file: File, mode: 'merge' | 'replace') => {
+      setIsMutating(true);
       try {
         const restored = await parseMembersBackupJson(file);
+
         if (mode === 'replace') {
-          if (persistMembers(restored)) {
-            pushToast(
-              'success',
-              `បានជំនួសទិន្នន័យសរុបចំនួន ${restored.length} នាក់ពីឯកសារបម្រុងទុក។`
-            );
-            setActiveAdminTab('manage');
+          for (const existing of members) {
+            await deleteMemberInDb(existing.id);
           }
+          let createdCount = 0;
+          for (const item of restored) {
+            const res = await createMemberInDb(item);
+            if (res.ok) createdCount += 1;
+          }
+          pushToast(
+            'success',
+            `បានជំនួសទិន្នន័យចំនួន ${createdCount} នាក់លើ Google Sheets រួចរាល់។`
+          );
         } else {
           const existingIds = new Set(members.map((m) => m.id));
           const uniqueAdded = restored.filter((m) => !existingIds.has(m.id));
-          const merged = [...uniqueAdded, ...members];
-          if (persistMembers(merged)) {
-            pushToast(
-              'success',
-              `បានបញ្ចូលបន្ថែមទិន្នន័យថ្មីចំនួន ${uniqueAdded.length} នាក់ (សរុប ${merged.length} នាក់)។`
-            );
-            setActiveAdminTab('manage');
+          let createdCount = 0;
+          for (const item of uniqueAdded) {
+            const res = await createMemberInDb(item);
+            if (res.ok) createdCount += 1;
           }
+          pushToast(
+            'success',
+            `បានបញ្ចូលបន្ថែមទិន្នន័យថ្មីចំនួន ${createdCount} នាក់ទៅលើ Google Sheets រួចរាល់។`
+          );
         }
+
+        await refreshMembers({ silentSuccessToast: true });
+        setActiveAdminTab('manage');
       } catch (err) {
         pushToast(
           'error',
@@ -372,9 +431,11 @@ export default function App() {
             ? err.message
             : 'មិនអាចអានឯកសារបម្រុងទុក JSON បានទេ។'
         );
+      } finally {
+        setIsMutating(false);
       }
     },
-    [members, persistMembers, pushToast]
+    [members, pushToast, refreshMembers]
   );
 
   const handleDownloadExcelTemplate = useCallback(() => {
@@ -382,11 +443,18 @@ export default function App() {
     pushToast('success', 'បានទាញយកឯកសារគំរូ Excel (.xlsx) ដោយជោគជ័យ។');
   }, [pushToast]);
 
-  const handleClearAllData = useCallback(() => {
-    if (persistMembers([])) {
-      pushToast('success', 'បានសម្អាតទិន្នន័យសមាជិកទាំងអស់រួចរាល់។');
+  const handleClearAllData = useCallback(async () => {
+    setIsMutating(true);
+    try {
+      for (const member of members) {
+        await deleteMemberInDb(member.id);
+      }
+      pushToast('success', 'បានសម្អាតទិន្នន័យសមាជិកទាំងអស់ចេញពី Google Sheets រួចរាល់។');
+      await refreshMembers({ silentSuccessToast: true });
+    } finally {
+      setIsMutating(false);
     }
-  }, [persistMembers, pushToast]);
+  }, [members, pushToast, refreshMembers]);
 
   const stats = useMemo(() => {
     const today = getTodayLocalDate();
@@ -492,11 +560,14 @@ export default function App() {
             {activeAdminTab === 'manage' && (
               <MemberTable
                 members={members}
+                isSyncing={isSyncing}
+                syncError={syncError}
+                isMutating={isMutating}
                 isImporting={isImporting}
                 resendingId={resendingId}
+                onRefresh={() => refreshMembers()}
                 onImportExcel={handleImportExcel}
                 onExportExcel={handleExportExcel}
-                onCopyGoogleSheets={handleCopyGoogleSheets}
                 onEditMember={(member) => setEditingMember(member)}
                 onDeleteMember={handleDeleteMember}
                 onBulkDeleteMembers={handleBulkDeleteMembers}
@@ -518,6 +589,7 @@ export default function App() {
               <div className="mx-auto max-w-3xl">
                 <DataBackupPanel
                   members={members}
+                  isMutating={isMutating}
                   onExportBackupJson={handleExportBackupJson}
                   onImportBackupJson={handleImportBackupJson}
                   onDownloadExcelTemplate={handleDownloadExcelTemplate}
@@ -537,12 +609,9 @@ export default function App() {
       </main>
 
       <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-[1380px] flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:px-6 lg:px-8">
-          <p>ប្រព័ន្ធចុះឈ្មោះសមាជិក និងភ្ញៀវថ្មី</p>
+        <div className="mx-auto flex max-w-[1380px] items-center justify-center px-4 py-4 text-center text-xs text-slate-500 sm:px-6 lg:px-8">
           <p>
-            {isAdmin
-              ? 'ទិន្នន័យត្រូវបានរក្សាទុកក្នុងកម្មវិធីរុករក (localStorage) និងគាំទ្រ Excel / Google Sheets / JSON Backup'
-              : 'សូមអរគុណសម្រាប់ការចុះឈ្មោះព័ត៌មានរបស់លោកអ្នក'}
+            ប្រព័ន្ធចុះឈ្មោះសមាជិក និងភ្ញៀវថ្មី • គាំទ្រការជូនដំណឹង Telegram និងឯកសារ Excel (.xlsx)
           </p>
         </div>
       </footer>

@@ -40,6 +40,8 @@ export interface SuccessModalPayload {
   subtitle: string;
   member?: Member;
   importedCount?: number;
+  dbSaved?: boolean;
+  dbError?: string;
   telegramSent: boolean;
   telegramError?: string;
 }

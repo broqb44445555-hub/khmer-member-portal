@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  Cloud,
   Database,
   Download,
   FileSpreadsheet,
   HardDrive,
+  Loader2,
   RotateCcw,
   Trash2,
   Upload,
@@ -12,14 +14,16 @@ import type { Member } from '../types/member';
 
 interface DataBackupPanelProps {
   members: Member[];
+  isMutating: boolean;
   onExportBackupJson: () => void;
   onImportBackupJson: (file: File, mode: 'merge' | 'replace') => Promise<void>;
   onDownloadExcelTemplate: () => void;
-  onClearAllData: () => void;
+  onClearAllData: () => Promise<void>;
 }
 
 export function DataBackupPanel({
   members,
+  isMutating,
   onExportBackupJson,
   onImportBackupJson,
   onDownloadExcelTemplate,
@@ -31,17 +35,9 @@ export function DataBackupPanel({
 
   const storageStats = useMemo(() => {
     const withPhotoCount = members.filter((m) => Boolean(m.photoDataUrl)).length;
-    let sizeKB = 0;
-    try {
-      const serialized = JSON.stringify(members);
-      sizeKB = Math.round((new Blob([serialized]).size / 1024) * 10) / 10;
-    } catch {
-      sizeKB = 0;
-    }
     return {
       total: members.length,
       withPhotoCount,
-      sizeKB,
     };
   }, [members]);
 
@@ -74,14 +70,14 @@ export function DataBackupPanel({
           id="data-backup-heading"
           className="text-lg font-semibold text-slate-900"
         >
-          បម្រុងទុក ស្តារ និងគ្រប់គ្រងទិន្នន័យ
+          បម្រុងទុក ស្តារ និងគ្រប់គ្រងទិន្នន័យរួម
         </h2>
         <p className="mt-1 text-xs text-slate-500">
-          រក្សាទុកច្បាប់ចម្លងទិន្នន័យទាំងអស់ (រួមទាំងរូបភាព) ជាឯកសារ JSON ទាញយកគំរូ Excel ឬសម្អាតទិន្នន័យក្នុងកម្មវិធីរុករក
+          ទិន្នន័យទាំងអស់ត្រូវបានផ្ទុករួមគ្នាលើ Google Sheets (Cloud) ដើម្បីឱ្យគ្រប់ទូរសព្ទ និងកុំព្យូទ័រមើលឃើញទិន្នន័យដូចគ្នាភ្លាមៗ
         </p>
       </div>
 
-      {/* Storage Overview Row (Clean flat divider grid, zero nested cards) */}
+      {/* Cloud Database Overview Row */}
       <div className="grid grid-cols-1 divide-y divide-slate-100 border-b border-slate-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <div className="px-6 py-4">
           <p className="text-xs text-slate-500">ទិន្នន័យសមាជិកសរុប</p>
@@ -104,12 +100,10 @@ export function DataBackupPanel({
         </div>
 
         <div className="px-6 py-4">
-          <p className="text-xs text-slate-500">ទំហំប្រើប្រាស់ក្នុង localStorage</p>
-          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-slate-900">
-            {storageStats.sizeKB}{' '}
-            <span className="font-mono text-xs font-normal text-slate-500">
-              KB
-            </span>
+          <p className="text-xs text-slate-500">ប្រភពផ្ទុកទិន្នន័យ</p>
+          <p className="mt-1.5 flex items-center gap-2 text-sm font-semibold text-[#0F4C5C]">
+            <Cloud className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Google Apps Script Cloud DB
           </p>
         </div>
       </div>
@@ -122,7 +116,7 @@ export function DataBackupPanel({
         className="sr-only"
       />
 
-      {/* Action Rows separated by hairline dividers */}
+      {/* Action Rows */}
       <div className="divide-y divide-slate-100">
         {/* 1. Export JSON Backup */}
         <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
@@ -136,14 +130,14 @@ export function DataBackupPanel({
                 បម្រុងទុកទិន្នន័យពេញលេញ (JSON Backup)
               </h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                ទាញយកទិន្នន័យសមាជិកទាំងអស់រួមទាំងរូបភាព Thumbnail ទុកប្រើប្រាស់ ឬផ្ទេរទៅកុំព្យូទ័រផ្សេង។
+                ទាញយកច្បាប់ចម្លងទិន្នន័យសមាជិកទាំងអស់រួមទាំងរូបភាព Thumbnail ទុកជាឯកសារបម្រុង។
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onExportBackupJson}
-            disabled={members.length === 0}
+            disabled={members.length === 0 || isMutating}
             className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg bg-[#0F4C5C] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B3B49] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -160,26 +154,32 @@ export function DataBackupPanel({
             />
             <div>
               <h3 className="text-sm font-semibold text-slate-900">
-                ស្តារទិន្នន័យពីឯកសារ JSON
+                ស្តារទិន្នន័យពីឯកសារ JSON ទៅកាន់ Cloud DB
               </h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                បញ្ចូលបន្ថែមទៅលើបញ្ជីបច្ចុប្បន្ន ឬជំនួសទិន្នន័យទាំងអស់ដោយប្រើឯកសារបម្រុងទុក។
+                បញ្ចូលបន្ថែមទៅលើប្រព័ន្ធទិន្នន័យរួម ឬជំនួសទិន្នន័យទាំងអស់ដោយប្រើឯកសារបម្រុងទុក។
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
+              disabled={isMutating}
               onClick={() => triggerRestore('merge')}
-              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap disabled:opacity-50"
             >
-              <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+              {isMutating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
               បញ្ចូលបន្ថែម (Merge)
             </button>
             <button
               type="button"
+              disabled={isMutating}
               onClick={() => triggerRestore('replace')}
-              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap disabled:opacity-50"
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               ជំនួសទាំងអស់ (Replace)
@@ -225,14 +225,14 @@ export function DataBackupPanel({
                 សម្អាតទិន្នន័យទាំងអស់
               </h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                លុបទិន្នន័យសមាជិកទាំងអស់ចេញពី localStorage។ សូមនាំចេញ Excel ឬ JSON Backup ទុកជាមុនសិន។
+                លុបទិន្នន័យសមាជិកទាំងអស់ចេញពីប្រព័ន្ធទិន្នន័យរួម។ សូមនាំចេញ Excel ឬ JSON Backup ទុកជាមុនសិន។
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={() => setIsConfirmClearOpen(true)}
-            disabled={members.length === 0}
+            disabled={members.length === 0 || isMutating}
             className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -248,7 +248,7 @@ export function DataBackupPanel({
           aria-modal="true"
           aria-labelledby="clear-all-confirm-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4"
-          onClick={() => setIsConfirmClearOpen(false)}
+          onClick={() => !isMutating && setIsConfirmClearOpen(false)}
         >
           <div
             className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
@@ -265,11 +265,12 @@ export function DataBackupPanel({
               <span className="font-mono font-semibold tabular-nums text-slate-900">
                 {members.length}
               </span>{' '}
-              នាក់ចេញទាំងអស់មែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។
+              នាក់ចេញពីប្រព័ន្ធទិន្នន័យរួមមែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។
             </p>
             <div className="mt-5 flex items-center justify-end gap-2.5">
               <button
                 type="button"
+                disabled={isMutating}
                 onClick={() => setIsConfirmClearOpen(false)}
                 className="min-h-[38px] rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap"
               >
@@ -277,12 +278,14 @@ export function DataBackupPanel({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  onClearAllData();
+                disabled={isMutating}
+                onClick={async () => {
+                  await onClearAllData();
                   setIsConfirmClearOpen(false);
                 }}
-                className="min-h-[38px] rounded-lg bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700 whitespace-nowrap"
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700 whitespace-nowrap disabled:opacity-60"
               >
+                {isMutating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 លុបទាំងអស់
               </button>
             </div>

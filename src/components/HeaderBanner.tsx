@@ -45,7 +45,7 @@ export function HeaderBanner({
               </h1>
               <p className="mt-1 text-sm text-teal-100/90">
                 {isAdmin
-                  ? 'របៀបគ្រប់គ្រង (Admin) · គ្រប់គ្រងបញ្ជីសមាជិក ស្ថិតិ និងឯកសារ Excel / Google Sheets'
+                  ? 'របៀបគ្រប់គ្រង (Admin) · គ្រប់គ្រងបញ្ជីសមាជិក ស្ថិតិ និងឯកសារ Excel (.xlsx)'
                   : 'សូមបំពេញព័ត៌មានខាងក្រោមដើម្បីចុះឈ្មោះសមាជិក ឬភ្ញៀវថ្មី'}
               </p>
             </div>

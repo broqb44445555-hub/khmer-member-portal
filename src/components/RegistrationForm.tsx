@@ -247,7 +247,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
                 </p>
               ) : (
                 <p className="text-xs text-slate-500">
-                  បង្ហាប់ដោយស្វ័យប្រវត្តិ (ទទឹងអតិបរមា 600px, JPEG 70%)
+                  បង្ហាប់ដោយស្វ័យប្រវត្តិ (150px, JPEG 50% សម្រាប់រក្សាទុកក្នុង Google Sheets)
                 </p>
               )}
             </div>

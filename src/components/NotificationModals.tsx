@@ -9,8 +9,18 @@ interface SuccessModalProps {
 export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
   if (!payload) return null;
 
-  const { title, subtitle, member, importedCount, telegramSent, telegramError } =
-    payload;
+  const {
+    title,
+    subtitle,
+    member,
+    importedCount,
+    dbSaved = true,
+    dbError,
+    telegramSent,
+    telegramError,
+  } = payload;
+
+  const allSucceeded = dbSaved && telegramSent;
 
   return (
     <div
@@ -28,12 +38,12 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
           <div className="flex items-center gap-3">
             <div
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                telegramSent
+                allSucceeded
                   ? 'bg-emerald-50 text-emerald-700'
                   : 'bg-amber-50 text-amber-700'
               }`}
             >
-              {telegramSent ? (
+              {allSucceeded ? (
                 <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
               ) : (
                 <AlertTriangle className="h-5 w-5" aria-hidden="true" />
@@ -106,12 +116,31 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
             <span className="font-mono font-semibold tabular-nums text-slate-900">
               {importedCount}
             </span>{' '}
-            នាក់ទៅក្នុងតារាងដោយជោគជ័យ។
+            នាក់ទៅក្នុងប្រព័ន្ធទិន្នន័យរួមដោយជោគជ័យ។
           </div>
         )}
 
-        {/* Explicit Telegram Delivery Status (Icon + Text, never hue-only) */}
-        <div className="mt-4 text-xs">
+        {/* Explicit Sync & Telegram Delivery Status */}
+        <div className="mt-4 space-y-2 text-xs">
+          {dbSaved ? (
+            <p className="flex items-center gap-2 font-medium text-emerald-700">
+              <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              បានរក្សាទុកក្នុងប្រព័ន្ធទិន្នន័យរួម (Google Sheets) ដោយជោគជ័យ។
+            </p>
+          ) : (
+            <div className="space-y-1 text-amber-800">
+              <p className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                មិនអាចរក្សាទុកក្នុង Google Sheets បានទេ។
+              </p>
+              {dbError && (
+                <p className="pl-6 font-mono text-[11px] text-slate-500">
+                  {dbError}
+                </p>
+              )}
+            </div>
+          )}
+
           {telegramSent ? (
             <div className="space-y-1">
               <p className="flex items-center gap-2 font-medium text-emerald-700">
@@ -128,7 +157,7 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
             <div className="space-y-1 text-amber-800">
               <p className="flex items-center gap-2 font-medium">
                 <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-                ទិន្នន័យត្រូវបានរក្សាទុក ប៉ុន្តែមិនអាចផ្ញើទៅ Telegram បានទេ។
+                មិនអាចផ្ញើជូនដំណឹងទៅ Telegram បានទេ។
               </p>
               {telegramError && (
                 <p className="pl-6 font-mono text-[11px] text-slate-500">

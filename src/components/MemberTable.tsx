@@ -1,12 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Check,
-  Copy,
+  AlertCircle,
   Download,
-  ExternalLink,
   FileSpreadsheet,
   Loader2,
   Pencil,
+  RefreshCw,
   Search,
   Send,
   Tag,
@@ -19,15 +18,18 @@ import type { Gender, Member } from '../types/member';
 
 interface MemberTableProps {
   members: Member[];
+  isSyncing: boolean;
+  syncError: string | null;
+  isMutating: boolean;
   isImporting: boolean;
   resendingId: string | null;
+  onRefresh: () => Promise<void>;
   onImportExcel: (file: File) => Promise<void>;
   onExportExcel: (subset?: Member[]) => void;
-  onCopyGoogleSheets: () => Promise<void>;
   onEditMember: (member: Member) => void;
-  onDeleteMember: (id: string) => void;
-  onBulkDeleteMembers: (ids: string[]) => void;
-  onBulkUpdateRole: (ids: string[], newRole: string) => void;
+  onDeleteMember: (id: string) => Promise<void>;
+  onBulkDeleteMembers: (ids: string[]) => Promise<void>;
+  onBulkUpdateRole: (ids: string[], newRole: string) => Promise<void>;
   onResendTelegram: (member: Member) => Promise<void>;
 }
 
@@ -36,11 +38,14 @@ type SortOrder = 'newest' | 'oldest' | 'name-asc';
 
 export function MemberTable({
   members,
+  isSyncing,
+  syncError,
+  isMutating,
   isImporting,
   resendingId,
+  onRefresh,
   onImportExcel,
   onExportExcel,
-  onCopyGoogleSheets,
   onEditMember,
   onDeleteMember,
   onBulkDeleteMembers,
@@ -53,7 +58,6 @@ export function MemberTable({
   const [districtFilter, setDistrictFilter] = useState<string>('all');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
-  const [copiedJustNow, setCopiedJustNow] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewMember, setPreviewMember] = useState<Member | null>(null);
@@ -189,26 +193,21 @@ export function MemberTable({
     }
   };
 
-  const handleCopyClick = async () => {
-    await onCopyGoogleSheets();
-    setCopiedJustNow(true);
-    window.setTimeout(() => setCopiedJustNow(false), 2000);
-  };
-
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!confirmDeleteMember) return;
-    onDeleteMember(confirmDeleteMember.id);
+    const targetId = confirmDeleteMember.id;
+    await onDeleteMember(targetId);
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      next.delete(confirmDeleteMember.id);
+      next.delete(targetId);
       return next;
     });
     setConfirmDeleteMember(null);
   };
 
-  const handleConfirmBulkDelete = () => {
+  const handleConfirmBulkDelete = async () => {
     if (validSelectedIds.length === 0) return;
-    onBulkDeleteMembers(validSelectedIds);
+    await onBulkDeleteMembers(validSelectedIds);
     clearSelection();
     setIsConfirmBulkDeleteOpen(false);
   };
@@ -219,11 +218,11 @@ export function MemberTable({
     onExportExcel(subset);
   };
 
-  const handleSubmitBulkRole = (e: React.FormEvent) => {
+  const handleSubmitBulkRole = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = bulkRoleValue.trim();
     if (!trimmed || validSelectedIds.length === 0) return;
-    onBulkUpdateRole(validSelectedIds, trimmed);
+    await onBulkUpdateRole(validSelectedIds, trimmed);
     setBulkRoleValue('');
     setIsBulkRoleModalOpen(false);
     clearSelection();
@@ -240,7 +239,7 @@ export function MemberTable({
       aria-labelledby="member-table-heading"
       className="rounded-xl border border-slate-200 bg-white"
     >
-      {/* Top Toolbar: Title + Excel & Google Sheets Actions */}
+      {/* Top Toolbar: Title + Excel Actions */}
       <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-baseline gap-2.5">
@@ -256,6 +255,19 @@ export function MemberTable({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onRefresh()}
+              disabled={isSyncing || isMutating}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:opacity-60"
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 text-[#0F4C5C] ${isSyncing ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
+              {isSyncing ? 'កំពុងទាញទិន្នន័យ...' : 'ធ្វើបច្ចុប្បន្នភាព / Refresh'}
+            </button>
+
             <input
               ref={excelInputRef}
               type="file"
@@ -267,52 +279,61 @@ export function MemberTable({
             <button
               type="button"
               onClick={() => excelInputRef.current?.click()}
-              disabled={isImporting}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:opacity-60"
+              disabled={isImporting || isMutating}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:opacity-60"
             >
               {isImporting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               ) : (
                 <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
               )}
-              នាំចូល Excel (.xlsx)
+              នាំចូល Excel
             </button>
 
             <button
               type="button"
               onClick={() => onExportExcel()}
-              disabled={members.length === 0}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={members.length === 0 || isSyncing}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-[#0F4C5C] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0B3B49] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] focus-visible:ring-offset-1 whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <Download className="h-3.5 w-3.5 text-[#0F4C5C]" aria-hidden="true" />
-              នាំចេញ Excel (.xlsx)
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              នាំចេញ Excel
             </button>
-
-            <button
-              type="button"
-              onClick={handleCopyClick}
-              disabled={members.length === 0}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              {copiedJustNow ? (
-                <Check className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
-              ) : (
-                <Copy className="h-3.5 w-3.5 text-slate-600" aria-hidden="true" />
-              )}
-              {copiedJustNow ? 'បានចម្លងរួចរាល់' : 'ចម្លងសម្រាប់ Google Sheets'}
-            </button>
-
-            <a
-              href="https://sheets.new"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-1 whitespace-nowrap shrink-0"
-            >
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-              បើក Google Sheets
-            </a>
           </div>
         </div>
+
+        {/* Cloud Sync Error Banner */}
+        {syncError && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-800"
+          >
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+              <span>{syncError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRefresh()}
+              disabled={isSyncing}
+              className="rounded-md border border-red-300 bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50 whitespace-nowrap"
+            >
+              ព្យាយាមម្តងទៀត
+            </button>
+          </div>
+        )}
+
+        {/* Syncing Status Bar while mutating or refreshing existing rows */}
+        {(isSyncing || isMutating) && members.length > 0 && (
+          <div className="flex items-center gap-2 text-xs font-medium text-[#0F4C5C]">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <span>
+              {isMutating
+                ? 'កំពុងធ្វើបច្ចុប្បន្នភាពទិន្នន័យលើ Google Sheets...'
+                : 'កំពុងទាញទិន្នន័យថ្មីបំផុតពី Google Sheets...'}
+            </span>
+          </div>
+        )}
 
         {/* Search, Role Filter, Sort & Gender Segmented Filter */}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -465,8 +486,30 @@ export function MemberTable({
         )}
       </div>
 
-      {/* Table / Empty States */}
-      {members.length === 0 ? (
+      {/* Table / Loading Skeleton / Empty States */}
+      {isSyncing && members.length === 0 ? (
+        <div className="px-6 py-10">
+          <div className="flex items-center justify-center gap-2.5 text-sm font-medium text-[#0F4C5C]">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <span>កំពុងទាញទិន្នន័យសមាជិកពី Google Sheets...</span>
+          </div>
+          <div className="mt-6 space-y-3" aria-hidden="true">
+            {[0, 1, 2, 3].map((row) => (
+              <div
+                key={row}
+                className="flex items-center gap-4 border-b border-slate-100 pb-3"
+              >
+                <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-200" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 w-1/3 animate-pulse rounded bg-slate-200" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100" />
+                </div>
+                <div className="h-3.5 w-24 animate-pulse rounded bg-slate-100" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : members.length === 0 ? (
         <div className="px-6 py-16 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
             <User className="h-6 w-6" aria-hidden="true" />
