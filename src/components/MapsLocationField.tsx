@@ -20,6 +20,9 @@ interface MapsLocationFieldProps {
   disabled?: boolean;
 }
 
+const IN_APP_BROWSER_GEO_ERROR =
+  "មិនអាចចាប់ទីតាំងបានទេ! ប្រសិនបើអ្នកកំពុងបើកតាម Messenger ឬ Telegram សូមចុចលើសញ្ញា (•••) ខាងលើ រួចជ្រើសរើស 'Open in Chrome / Browser' ដើម្បីយកទីតាំង ឬអាច Copy Link ពីកម្មវិធី Google Maps មកបិទភ្ជាប់ដោយផ្ទាល់បាន។";
+
 export function MapsLocationField({
   value,
   onChange,
@@ -27,6 +30,7 @@ export function MapsLocationField({
   disabled = false,
 }: MapsLocationFieldProps) {
   const [isLocating, setIsLocating] = useState(false);
+  const [locatingStage, setLocatingStage] = useState<'gps' | 'network'>('gps');
   const [geoError, setGeoError] = useState<string | null>(null);
 
   const parsedLocation = parseGoogleMapsUrl(value);
@@ -38,42 +42,53 @@ export function MapsLocationField({
     setGeoError(null);
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setGeoError(
-        'កម្មវិធីរុករក (Browser) របស់អ្នកមិនគាំទ្រការចាប់ទីតាំង GPS ទេ។ អ្នកអាចចម្លងតំណភ្ជាប់ Google Maps មកបិទភ្ជាប់ដោយផ្ទាល់បាន។'
-      );
+      setGeoError(IN_APP_BROWSER_GEO_ERROR);
       return;
     }
 
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const url = buildGoogleMapsUrl(
-          position.coords.latitude,
-          position.coords.longitude
-        );
-        onChange(url);
-        setIsLocating(false);
-      },
-      (err) => {
-        setIsLocating(false);
-        if (err.code === err.PERMISSION_DENIED) {
-          setGeoError(
-            'អ្នកបានបដិសេធសិទ្ធិចូលប្រើទីតាំង GPS។ សូមអនុញ្ញាតសិទ្ធិ Location នៅក្នុង Browser ឬបិទភ្ជាប់តំណភ្ជាប់ Google Maps ដោយខ្លួនឯង។'
-          );
-        } else if (err.code === err.TIMEOUT) {
-          setGeoError(
-            'ការចាប់សញ្ញា GPS អស់ពេលកំណត់។ សូមព្យាយាមម្តងទៀតនៅកន្លែងដែលមានសញ្ញាល្អ។'
-          );
-        } else {
-          setGeoError(
-            'មិនអាចចាប់ទីតាំង GPS បានទេនៅពេលនេះ។ សូមព្យាយាមម្តងទៀត ឬបញ្ចូលតំណភ្ជាប់ Google Maps ដោយដៃ។'
-          );
+    const onSuccess = (position: GeolocationPosition) => {
+      const url = buildGoogleMapsUrl(
+        position.coords.latitude,
+        position.coords.longitude
+      );
+      onChange(url);
+      setIsLocating(false);
+    };
+
+    const requestNetworkFallback = () => {
+      setLocatingStage('network');
+      navigator.geolocation.getCurrentPosition(
+        onSuccess,
+        () => {
+          setIsLocating(false);
+          setGeoError(IN_APP_BROWSER_GEO_ERROR);
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 15000,
+          maximumAge: 60000,
         }
+      );
+    };
+
+    setIsLocating(true);
+    setLocatingStage('gps');
+
+    navigator.geolocation.getCurrentPosition(
+      onSuccess,
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setIsLocating(false);
+          setGeoError(IN_APP_BROWSER_GEO_ERROR);
+          return;
+        }
+        // Automatically fall back to Wi-Fi / 4G network location on Timeout or Position Unavailable
+        requestNetworkFallback();
       },
       {
         enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
+        timeout: 8000,
+        maximumAge: 60000,
       }
     );
   };
@@ -98,7 +113,9 @@ export function MapsLocationField({
           {isLocating ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              កំពុងចាប់ទីតាំង GPS...
+              {locatingStage === 'network'
+                ? 'កំពុងចាប់ទីតាំងតាម Wi-Fi/4G...'
+                : 'កំពុងចាប់ទីតាំង GPS...'}
             </>
           ) : (
             <>
