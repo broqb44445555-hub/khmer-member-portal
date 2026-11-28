@@ -5,6 +5,7 @@ import {
   formatFullKhmerAddress,
 } from '../data/battambangAddress';
 import type { Gender, Member, MemberAddress } from '../types/member';
+import { sanitizeHttpUrl } from './googleMaps';
 import { createMemberId, getTodayLocalDate } from './storage';
 
 const KHMER_HEADERS = [
@@ -15,6 +16,7 @@ const KHMER_HEADERS = [
   'Telegram',
   'តួនាទី / ប្រភេទភ្ញៀវ',
   'ទីកន្លែងបច្ចុប្បន្ន',
+  'Maps_Link',
   'កាលបរិច្ឆេទ',
 ] as const;
 
@@ -216,6 +218,16 @@ export async function importMembersFromExcel(file: File): Promise<Member[]> {
       };
     }
 
+    const mapsLinkRaw = pickCellValue(row, [
+      'Maps_Link',
+      'mapslink',
+      'googlemapslink',
+      'googlemaps',
+      'តំណភ្ជាប់ Google Maps',
+      'ទីតាំង Google Maps',
+    ]);
+    const sanitizedMapsLink = sanitizeHttpUrl(mapsLinkRaw) ?? undefined;
+
     imported.push({
       id: createMemberId(imported.length),
       fullName: fullName || 'មិនមានឈ្មោះ',
@@ -225,6 +237,7 @@ export async function importMembersFromExcel(file: File): Promise<Member[]> {
       role: roleRaw || 'សមាជិក',
       joinDate: parseExcelDate(rawDateVal),
       address: parsedAddress,
+      mapsLink: sanitizedMapsLink,
       createdAt: nowIso,
       telegramSent: false,
     });
@@ -251,6 +264,7 @@ export function exportMembersToExcel(members: Member[]): void {
     Telegram: m.telegram || '',
     'តួនាទី / ប្រភេទភ្ញៀវ': m.role,
     'ទីកន្លែងបច្ចុប្បន្ន': m.address?.fullAddress || '',
+    Maps_Link: m.mapsLink || '',
     'កាលបរិច្ឆេទ': m.joinDate,
   }));
 
@@ -266,6 +280,7 @@ export function exportMembersToExcel(members: Member[]): void {
     { wch: 20 },
     { wch: 22 },
     { wch: 42 },
+    { wch: 36 },
     { wch: 15 },
   ];
 
@@ -289,6 +304,7 @@ export function downloadExcelTemplate(): void {
       Telegram: '@sokdara',
       'តួនាទី / ប្រភេទភ្ញៀវ': 'សមាជិកថ្មី',
       'ទីកន្លែងបច្ចុប្បន្ន': 'ភូមិ ដីក្រហម, ឃុំកំរៀង, ស្រុកកំរៀង, ខេត្តបាត់ដំបង',
+      Maps_Link: 'https://www.google.com/maps?q=13.095729,103.202206',
       'កាលបរិច្ឆេទ': getTodayLocalDate(),
     },
   ];
@@ -305,6 +321,7 @@ export function downloadExcelTemplate(): void {
     { wch: 20 },
     { wch: 22 },
     { wch: 42 },
+    { wch: 36 },
     { wch: 15 },
   ];
 
@@ -389,6 +406,14 @@ export async function parseMembersBackupJson(file: File): Promise<Member[]> {
           }
         : undefined;
 
+    const rawBackupMaps =
+      typeof obj.mapsLink === 'string'
+        ? obj.mapsLink
+        : typeof obj.Maps_Link === 'string'
+          ? obj.Maps_Link
+          : '';
+    const restoredMapsLink = sanitizeHttpUrl(rawBackupMaps) ?? undefined;
+
     validMembers.push({
       id:
         typeof obj.id === 'string' && obj.id.trim()
@@ -401,6 +426,7 @@ export async function parseMembersBackupJson(file: File): Promise<Member[]> {
       role: String(obj.role ?? 'សមាជិក').trim() || 'សមាជិក',
       joinDate: parseExcelDate(obj.joinDate),
       address: restoredAddress,
+      mapsLink: restoredMapsLink,
       photoDataUrl:
         typeof obj.photoDataUrl === 'string' &&
         obj.photoDataUrl.startsWith('data:image/')

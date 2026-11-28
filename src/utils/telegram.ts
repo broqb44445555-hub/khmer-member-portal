@@ -1,4 +1,5 @@
 import type { Member, TelegramSendResult } from '../types/member';
+import { sanitizeHttpUrl } from './googleMaps';
 import { dataUrlToBlob } from './imageCompression';
 
 const TELEGRAM_BOT_TOKEN =
@@ -16,7 +17,8 @@ function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 export function formatKhmerMemberCaption(
@@ -35,7 +37,9 @@ export function formatKhmerMemberCaption(
     ? escapeHtml(member.address.fullAddress)
     : 'មិនបានបញ្ជាក់';
 
-  return [
+  const safeMapsUrl = sanitizeHttpUrl(member.mapsLink);
+
+  const lines = [
     `<b>${escapeHtml(headerTitle)}</b>`,
     '────────────────────',
     `<b>ឈ្មោះពេញ៖</b> ${escapeHtml(member.fullName)}`,
@@ -44,8 +48,17 @@ export function formatKhmerMemberCaption(
     `<b>Telegram៖</b> ${tgDisplay}`,
     `<b>តួនាទី / ប្រភេទភ្ញៀវ៖</b> ${escapeHtml(member.role)}`,
     `<b>ទីកន្លែងបច្ចុប្បន្ន៖</b> ${addressDisplay}`,
-    `<b>កាលបរិច្ឆេទ៖</b> ${escapeHtml(member.joinDate)}`,
-  ].join('\n');
+  ];
+
+  if (safeMapsUrl) {
+    lines.push(
+      `<b>ទីតាំង Google Maps៖</b> <a href="${escapeHtml(safeMapsUrl)}">📍 បើកមើលលើ Google Maps</a>`
+    );
+  }
+
+  lines.push(`<b>កាលបរិច្ឆេទ៖</b> ${escapeHtml(member.joinDate)}`);
+
+  return lines.join('\n');
 }
 
 async function sendSingleChatMember(

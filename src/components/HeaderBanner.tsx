@@ -1,7 +1,8 @@
-import { Lock, ShieldCheck, Users } from 'lucide-react';
+import { Lock, QrCode, ShieldCheck, Users } from 'lucide-react';
 
 interface HeaderBannerProps {
   isAdmin: boolean;
+  onOpenQrModal: () => void;
   onOpenAdminModal: () => void;
   onLockAdmin: () => void;
   totalCount: number;
@@ -12,6 +13,7 @@ interface HeaderBannerProps {
 
 export function HeaderBanner({
   isAdmin,
+  onOpenQrModal,
   onOpenAdminModal,
   onLockAdmin,
   totalCount,
@@ -51,8 +53,8 @@ export function HeaderBanner({
             </div>
           </div>
 
-          {/* Right Controls: Admin Stats (only when unlocked) + Admin Mode Button */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-white/15 pt-4 lg:justify-end lg:gap-6 lg:border-t-0 lg:pt-0">
+          {/* Right Controls: Admin Stats (only when unlocked) + QR Code + Admin Mode Button */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/15 pt-4 lg:justify-end lg:gap-5 lg:border-t-0 lg:pt-0">
             {isAdmin && (
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <div className="flex items-baseline gap-2">
@@ -94,25 +96,36 @@ export function HeaderBanner({
               </div>
             )}
 
-            {isAdmin ? (
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
-                onClick={onLockAdmin}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white/15 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/25 transition-colors hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white whitespace-nowrap shrink-0"
+                onClick={onOpenQrModal}
+                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white/12 px-3.5 py-2 text-xs font-semibold text-white ring-1 ring-white/25 transition-colors hover:bg-white/22 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white whitespace-nowrap shrink-0"
               >
-                <ShieldCheck className="h-4 w-4 text-teal-200" aria-hidden="true" />
-                ចាកចេញពី Admin Mode
+                <QrCode className="h-4 w-4 text-teal-100" aria-hidden="true" />
+                QR Code ចុះឈ្មោះ
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onOpenAdminModal}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white/12 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/25 transition-colors hover:bg-white/22 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white whitespace-nowrap shrink-0"
-              >
-                <Lock className="h-3.5 w-3.5 text-teal-100" aria-hidden="true" />
-                Admin Mode
-              </button>
-            )}
+
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={onLockAdmin}
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white/15 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/25 transition-colors hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white whitespace-nowrap shrink-0"
+                >
+                  <ShieldCheck className="h-4 w-4 text-teal-200" aria-hidden="true" />
+                  ចាកចេញពី Admin Mode
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onOpenAdminModal}
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white/12 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/25 transition-colors hover:bg-white/22 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white whitespace-nowrap shrink-0"
+                >
+                  <Lock className="h-3.5 w-3.5 text-teal-100" aria-hidden="true" />
+                  Admin Mode
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

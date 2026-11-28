@@ -10,9 +10,11 @@ import type {
   Member,
   MemberAddress,
 } from '../types/member';
+import { sanitizeHttpUrl } from '../utils/googleMaps';
 import { compressImageFile } from '../utils/imageCompression';
 import { createMemberId, getTodayLocalDate } from '../utils/storage';
 import { AddressSelector } from './AddressSelector';
+import { MapsLocationField } from './MapsLocationField';
 
 interface RegistrationFormProps {
   onRegister: (member: Member, photoBlob: Blob | null) => Promise<void>;
@@ -39,6 +41,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
   const [address, setAddress] = useState<MemberAddress>(() =>
     createEmptyAddress()
   );
+  const [mapsLink, setMapsLink] = useState('');
 
   const [compressedPhoto, setCompressedPhoto] =
     useState<CompressedImageResult | null>(null);
@@ -96,6 +99,18 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
       return;
     }
 
+    const trimmedMapsLink = mapsLink.trim();
+    const safeMapsLink = trimmedMapsLink
+      ? sanitizeHttpUrl(trimmedMapsLink)
+      : null;
+
+    if (trimmedMapsLink && !safeMapsLink) {
+      onError(
+        'តំណភ្ជាប់ Google Maps មិនត្រឹមត្រូវទេ។ សូមបញ្ចូលតំណភ្ជាប់ដែលចាប់ផ្តើមដោយ https:// ឬចុចប៊ូតុង GPS។'
+      );
+      return;
+    }
+
     const formattedTelegram = trimmedTelegram
       ? trimmedTelegram.startsWith('@')
         ? trimmedTelegram
@@ -124,6 +139,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
       role: trimmedRole,
       joinDate: joinDate || getTodayLocalDate(),
       address: normalizedAddress,
+      mapsLink: safeMapsLink ?? undefined,
       photoDataUrl: compressedPhoto?.dataUrl,
       createdAt: new Date().toISOString(),
     };
@@ -140,6 +156,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
       setRole('');
       setJoinDate(getTodayLocalDate());
       setAddress(createEmptyAddress());
+      setMapsLink('');
       setCompressedPhoto(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -355,13 +372,22 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
           </datalist>
         </div>
 
-        {/* Current Address Cascading Selector */}
-        <AddressSelector
-          value={address}
-          onChange={setAddress}
-          required
-          idPrefix="reg-addr"
-        />
+        {/* Current Address Cascading Selector + Optional Google Maps Location */}
+        <div className="space-y-3.5">
+          <AddressSelector
+            value={address}
+            onChange={setAddress}
+            required
+            idPrefix="reg-addr"
+          />
+
+          <MapsLocationField
+            value={mapsLink}
+            onChange={setMapsLink}
+            idPrefix="reg"
+            disabled={isSubmitting}
+          />
+        </div>
 
         {/* Join Date */}
         <div>

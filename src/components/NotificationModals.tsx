@@ -1,5 +1,6 @@
-import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Info, X } from 'lucide-react';
 import type { SuccessModalPayload, ToastNotice } from '../types/member';
+import { sanitizeHttpUrl } from '../utils/googleMaps';
 
 interface SuccessModalProps {
   payload: SuccessModalPayload | null;
@@ -101,6 +102,17 @@ export function SuccessPopupModal({ payload, onClose }: SuccessModalProps) {
                 <p className="text-xs text-slate-600">
                   {member.address.fullAddress}
                 </p>
+              )}
+              {sanitizeHttpUrl(member.mapsLink) && (
+                <a
+                  href={sanitizeHttpUrl(member.mapsLink)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 pt-0.5 text-xs font-medium text-[#0F4C5C] hover:underline"
+                >
+                  🗺️ មើលទីតាំងលើ Google Maps
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
               )}
               <p className="font-mono text-xs tabular-nums text-slate-500">
                 កាលបរិច្ឆេទ៖ {member.joinDate}

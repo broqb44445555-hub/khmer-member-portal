@@ -1,5 +1,6 @@
 import { parseFullKhmerAddress } from '../data/battambangAddress';
 import type { Gender, Member } from '../types/member';
+import { sanitizeHttpUrl } from './googleMaps';
 import { getTodayLocalDate } from './storage';
 
 export const APPS_SCRIPT_URL =
@@ -84,6 +85,15 @@ function mapRawRowToMember(raw: Record<string, unknown>, index: number): Member 
     raw.joinDate ?? raw.date ?? raw['កាលបរិច្ឆេទ']
   );
 
+  const rawMapsLink =
+    raw.Maps_Link ??
+    raw.mapsLink ??
+    raw.maps_link ??
+    raw.googleMapsLink ??
+    raw['តំណភ្ជាប់ Google Maps'] ??
+    '';
+  const mapsLink = sanitizeHttpUrl(String(rawMapsLink)) ?? undefined;
+
   return {
     id,
     fullName: fullName || 'មិនមានឈ្មោះ',
@@ -96,6 +106,7 @@ function mapRawRowToMember(raw: Record<string, unknown>, index: number): Member 
       ).trim() || 'សមាជិក',
     joinDate,
     address,
+    mapsLink,
     photoDataUrl: normalizePhoto(raw.photo ?? raw.photoDataUrl),
     createdAt:
       typeof raw.createdAt === 'string' && raw.createdAt
@@ -230,6 +241,8 @@ export function createMemberInDb(member: Member): Promise<DbMutationResult> {
     telegram: member.telegram || '',
     role: member.role,
     address: member.address?.fullAddress || '',
+    Maps_Link: member.mapsLink || '',
+    mapsLink: member.mapsLink || '',
     joinDate: member.joinDate,
     photo: member.photoDataUrl || '',
   });
@@ -245,6 +258,8 @@ export function updateMemberInDb(member: Member): Promise<DbMutationResult> {
     telegram: member.telegram || '',
     role: member.role,
     address: member.address?.fullAddress || '',
+    Maps_Link: member.mapsLink || '',
+    mapsLink: member.mapsLink || '',
     joinDate: member.joinDate,
     photo: member.photoDataUrl || '',
   });

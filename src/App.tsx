@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, TableProperties, UserPlus } from 'lucide-react';
 import { AdminPasscodeModal } from './components/AdminPasscodeModal';
 import { DataBackupPanel } from './components/DataBackupPanel';
@@ -6,6 +6,7 @@ import { EditMemberModal } from './components/EditMemberModal';
 import { HeaderBanner } from './components/HeaderBanner';
 import { MemberTable } from './components/MemberTable';
 import { SuccessPopupModal, ToastStack } from './components/NotificationModals';
+import { QrCodeModal } from './components/QrCodeModal';
 import { RegistrationForm } from './components/RegistrationForm';
 import type { Member, SuccessModalPayload, ToastNotice } from './types/member';
 import {
@@ -36,6 +37,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('manage');
   const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -48,6 +50,15 @@ export default function App() {
     null
   );
   const [toasts, setToasts] = useState<ToastNotice[]>([]);
+  const [isMapsQuotaExceeded, setIsMapsQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => setIsMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
 
   const pushToast = useCallback(
     (type: ToastNotice['type'], message: string) => {
@@ -478,8 +489,26 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F6F8F9] text-slate-900 flex flex-col">
+      {isMapsQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
+
       <HeaderBanner
         isAdmin={isAdmin}
+        onOpenQrModal={() => setIsQrModalOpen(true)}
         onOpenAdminModal={() => setIsPasscodeModalOpen(true)}
         onLockAdmin={handleLockAdmin}
         totalCount={stats.totalCount}
@@ -615,6 +644,12 @@ export default function App() {
           </p>
         </div>
       </footer>
+
+      <QrCodeModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        onNotify={pushToast}
+      />
 
       <AdminPasscodeModal
         isOpen={isPasscodeModalOpen}

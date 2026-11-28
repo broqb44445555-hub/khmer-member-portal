@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   Loader2,
   Pencil,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 import { BATTAMBANG_DISTRICTS } from '../data/battambangAddress';
 import type { Gender, Member } from '../types/member';
+import { sanitizeHttpUrl } from '../utils/googleMaps';
 
 interface MemberTableProps {
   members: Member[];
@@ -112,7 +114,8 @@ export function MemberTable({
         m.telegram.toLowerCase().includes(q) ||
         m.role.toLowerCase().includes(q) ||
         m.joinDate.toLowerCase().includes(q) ||
-        (m.address?.fullAddress?.toLowerCase().includes(q) ?? false)
+        (m.address?.fullAddress?.toLowerCase().includes(q) ?? false) ||
+        (m.mapsLink?.toLowerCase().includes(q) ?? false)
       );
     });
 
@@ -587,6 +590,7 @@ export function MemberTable({
             <tbody className="divide-y divide-slate-100">
               {filteredMembers.map((member) => {
                 const tgHandle = member.telegram.replace(/^@/, '');
+                const safeMapsUrl = sanitizeHttpUrl(member.mapsLink);
                 const isResending = resendingId === member.id;
                 const isSelected = selectedIds.has(member.id);
 
@@ -678,18 +682,33 @@ export function MemberTable({
                       </span>
                     </td>
 
-                    {/* Current Address */}
+                    {/* Current Address + Google Maps Link */}
                     <td className="px-3 py-3 text-slate-600">
-                      {member.address?.fullAddress ? (
-                        <span
-                          title={member.address.fullAddress}
-                          className="block max-w-[230px] truncate text-xs"
-                        >
-                          {member.address.fullAddress}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      <div className="flex flex-col items-start gap-1.5">
+                        {member.address?.fullAddress ? (
+                          <span
+                            title={member.address.fullAddress}
+                            className="block max-w-[230px] truncate text-xs"
+                          >
+                            {member.address.fullAddress}
+                          </span>
+                        ) : !safeMapsUrl ? (
+                          <span className="text-slate-400">—</span>
+                        ) : null}
+
+                        {safeMapsUrl && (
+                          <a
+                            href={safeMapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`មើលទីតាំង Google Maps របស់ ${member.fullName}`}
+                            className="inline-flex min-h-[28px] items-center gap-1 rounded-md border border-[#0F4C5C]/25 bg-[#0F4C5C]/[0.05] px-2 py-0.5 text-[11px] font-semibold text-[#0F4C5C] transition-colors hover:bg-[#0F4C5C]/10 whitespace-nowrap shrink-0"
+                          >
+                            🗺️ មើលទីតាំង (Map)
+                            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                          </a>
+                        )}
+                      </div>
                     </td>
 
                     {/* Join Date */}
@@ -783,6 +802,20 @@ export function MemberTable({
                 className="mx-auto max-h-[65vh] w-auto rounded-lg object-contain"
               />
             </div>
+            {sanitizeHttpUrl(previewMember.mapsLink) && (
+              <div className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-3">
+                <span className="text-xs text-slate-500">ទីតាំង Google Maps</span>
+                <a
+                  href={sanitizeHttpUrl(previewMember.mapsLink)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#0F4C5C]/30 bg-[#0F4C5C]/[0.05] px-3 py-1.5 text-xs font-semibold text-[#0F4C5C] hover:bg-[#0F4C5C]/10 whitespace-nowrap"
+                >
+                  🗺️ មើលទីតាំង (Map)
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -10,8 +10,10 @@ import type {
   Member,
   MemberAddress,
 } from '../types/member';
+import { sanitizeHttpUrl } from '../utils/googleMaps';
 import { compressImageFile } from '../utils/imageCompression';
 import { AddressSelector } from './AddressSelector';
+import { MapsLocationField } from './MapsLocationField';
 
 interface EditMemberModalProps {
   member: Member | null;
@@ -48,6 +50,7 @@ export function EditMemberModal({
   const [address, setAddress] = useState<MemberAddress>(() =>
     createEmptyAddress()
   );
+  const [mapsLink, setMapsLink] = useState('');
   const [photoDataUrl, setPhotoDataUrl] = useState<string | undefined>(
     undefined
   );
@@ -67,6 +70,7 @@ export function EditMemberModal({
       setRole(member.role);
       setJoinDate(member.joinDate);
       setAddress(member.address ? { ...member.address } : createEmptyAddress());
+      setMapsLink(member.mapsLink || '');
       setPhotoDataUrl(member.photoDataUrl);
       setNewPhotoResult(null);
       setNotifyTelegram(false);
@@ -124,6 +128,18 @@ export function EditMemberModal({
       return;
     }
 
+    const trimmedMapsLink = mapsLink.trim();
+    const safeMapsLink = trimmedMapsLink
+      ? sanitizeHttpUrl(trimmedMapsLink)
+      : null;
+
+    if (trimmedMapsLink && !safeMapsLink) {
+      onError(
+        'តំណភ្ជាប់ Google Maps មិនត្រឹមត្រូវទេ។ សូមបញ្ចូលតំណភ្ជាប់ដែលចាប់ផ្តើមដោយ https:// ឬចុចប៊ូតុង GPS។'
+      );
+      return;
+    }
+
     const formattedTelegram = trimmedTelegram
       ? trimmedTelegram.startsWith('@')
         ? trimmedTelegram
@@ -160,6 +176,7 @@ export function EditMemberModal({
       role: trimmedRole,
       joinDate: joinDate || member.joinDate,
       address: normalizedAddress,
+      mapsLink: safeMapsLink ?? undefined,
       photoDataUrl: activePhotoUrl,
     };
 
@@ -405,12 +422,21 @@ export function EditMemberModal({
             </datalist>
           </div>
 
-          {/* Current Address Editor */}
-          <AddressSelector
-            value={address}
-            onChange={setAddress}
-            idPrefix="edit-addr"
-          />
+          {/* Current Address + Google Maps Location Editor */}
+          <div className="space-y-3.5">
+            <AddressSelector
+              value={address}
+              onChange={setAddress}
+              idPrefix="edit-addr"
+            />
+
+            <MapsLocationField
+              value={mapsLink}
+              onChange={setMapsLink}
+              idPrefix="edit"
+              disabled={isSaving}
+            />
+          </div>
 
           {/* Optional Telegram Update Notification */}
           <label className="flex items-center gap-2.5 pt-1 text-xs text-slate-700 select-none">

@@ -17,7 +17,8 @@ export interface Member {
   role: string;
   joinDate: string; // YYYY-MM-DD
   address?: MemberAddress;
-  photoDataUrl?: string; // Compressed base64 JPEG (max width 600px, quality 0.7)
+  mapsLink?: string;
+  photoDataUrl?: string; // Compressed base64 JPEG (max width 150px, quality 0.5)
   createdAt: string; // ISO timestamp
   telegramSent?: boolean;
 }
