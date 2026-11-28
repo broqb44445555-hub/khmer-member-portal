@@ -14,6 +14,7 @@ import { sanitizeHttpUrl } from '../utils/googleMaps';
 import { compressImageFile } from '../utils/imageCompression';
 import { createMemberId, getTodayLocalDate } from '../utils/storage';
 import { AddressSelector } from './AddressSelector';
+import { InAppBrowserBanner } from './InAppBrowserBanner';
 import { MapsLocationField } from './MapsLocationField';
 
 interface RegistrationFormProps {
@@ -167,10 +168,13 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
   };
 
   return (
-    <section
-      aria-labelledby="registration-form-heading"
-      className="rounded-xl border border-slate-200 bg-white p-6"
-    >
+    <div>
+      <InAppBrowserBanner />
+
+      <section
+        aria-labelledby="registration-form-heading"
+        className="rounded-xl border border-slate-200 bg-white p-6"
+      >
       <div className="border-b border-slate-100 pb-4">
         <h2
           id="registration-form-heading"
@@ -428,6 +432,7 @@ export function RegistrationForm({ onRegister, onError }: RegistrationFormProps)
           </button>
         </div>
       </form>
-    </section>
+      </section>
+    </div>
   );
 }

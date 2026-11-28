@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import {
-  AlertCircle,
+  CheckCircle2,
   ExternalLink,
+  Info,
   Loader2,
   MapPin,
   Navigation,
@@ -20,8 +21,85 @@ interface MapsLocationFieldProps {
   disabled?: boolean;
 }
 
-const IN_APP_BROWSER_GEO_ERROR =
-  "មិនអាចចាប់ទីតាំងបានទេ! ប្រសិនបើអ្នកកំពុងបើកតាម Messenger ឬ Telegram សូមចុចលើសញ្ញា (•••) ខាងលើ រួចជ្រើសរើស 'Open in Chrome / Browser' ដើម្បីយកទីតាំង ឬអាច Copy Link ពីកម្មវិធី Google Maps មកបិទភ្ជាប់ដោយផ្ទាល់បាន។";
+const IP_FALLBACK_SUCCESS_MSG =
+  '✅ បានចាប់ទីតាំងតាមបណ្តាញអ៊ីនធឺណិតរួចរាល់! (បើចង់បានទីតាំងច្បាស់ 100% សូមបើកក្នុង Chrome)';
+
+const OFFLINE_HELPER_MSG =
+  'សូមចុចប៊ូតុង «🗺️ បើក Google Maps» ខាងលើ ដើម្បីរើសទីតាំង រួចចុច Share → Copy Link មកបិទភ្ជាប់ក្នុងប្រអប់នេះ។';
+
+async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function isValidCoordPair(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+async function fetchIpGeolocation(): Promise<{ lat: number; lng: number } | null> {
+  const providers: Array<{
+    url: string;
+    parse: (data: Record<string, unknown>) => { lat: number; lng: number } | null;
+  }> = [
+    {
+      url: 'https://ipwho.is/',
+      parse: (data) => {
+        if (data.success === false) return null;
+        const lat = Number(data.latitude);
+        const lng = Number(data.longitude);
+        return isValidCoordPair(lat, lng) ? { lat, lng } : null;
+      },
+    },
+    {
+      url: 'https://ipapi.co/json/',
+      parse: (data) => {
+        const lat = Number(data.latitude);
+        const lng = Number(data.longitude);
+        return isValidCoordPair(lat, lng) ? { lat, lng } : null;
+      },
+    },
+    {
+      url: 'https://get.geojs.io/v1/ip/geo.json',
+      parse: (data) => {
+        const lat = Number(data.latitude);
+        const lng = Number(data.longitude);
+        return isValidCoordPair(lat, lng) ? { lat, lng } : null;
+      },
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const response = await fetchWithTimeout(provider.url, 6000);
+      if (!response.ok) continue;
+      const json = (await response.json()) as Record<string, unknown>;
+      const coords = provider.parse(json);
+      if (coords) {
+        return coords;
+      }
+    } catch {
+      // Try next free IP geolocation provider
+    }
+  }
+
+  return null;
+}
 
 export function MapsLocationField({
   value,
@@ -30,63 +108,63 @@ export function MapsLocationField({
   disabled = false,
 }: MapsLocationFieldProps) {
   const [isLocating, setIsLocating] = useState(false);
-  const [locatingStage, setLocatingStage] = useState<'gps' | 'network'>('gps');
-  const [geoError, setGeoError] = useState<string | null>(null);
+  const [locatingStage, setLocatingStage] = useState<'gps' | 'ip'>('gps');
+  const [statusNotice, setStatusNotice] = useState<{
+    type: 'success' | 'info';
+    message: string;
+  } | null>(null);
 
   const parsedLocation = parseGoogleMapsUrl(value);
   const embedSrc = parsedLocation?.embedQuery
     ? buildMapsEmbedIframeUrl(parsedLocation.embedQuery)
     : null;
 
-  const handleCaptureGps = () => {
-    setGeoError(null);
+  const runIpFallback = async () => {
+    setLocatingStage('ip');
+    const coords = await fetchIpGeolocation();
+    setIsLocating(false);
 
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setGeoError(IN_APP_BROWSER_GEO_ERROR);
-      return;
-    }
-
-    const onSuccess = (position: GeolocationPosition) => {
-      const url = buildGoogleMapsUrl(
-        position.coords.latitude,
-        position.coords.longitude
-      );
+    if (coords) {
+      const url = buildGoogleMapsUrl(coords.lat, coords.lng);
       onChange(url);
-      setIsLocating(false);
-    };
+      setStatusNotice({
+        type: 'success',
+        message: IP_FALLBACK_SUCCESS_MSG,
+      });
+    } else {
+      setStatusNotice({
+        type: 'info',
+        message: OFFLINE_HELPER_MSG,
+      });
+    }
+  };
 
-    const requestNetworkFallback = () => {
-      setLocatingStage('network');
-      navigator.geolocation.getCurrentPosition(
-        onSuccess,
-        () => {
-          setIsLocating(false);
-          setGeoError(IN_APP_BROWSER_GEO_ERROR);
-        },
-        {
-          enableHighAccuracy: false,
-          timeout: 15000,
-          maximumAge: 60000,
-        }
-      );
-    };
-
+  const handleCaptureGps = () => {
+    setStatusNotice(null);
     setIsLocating(true);
     setLocatingStage('gps');
 
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      void runIpFallback();
+      return;
+    }
+
     navigator.geolocation.getCurrentPosition(
-      onSuccess,
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          setIsLocating(false);
-          setGeoError(IN_APP_BROWSER_GEO_ERROR);
-          return;
-        }
-        // Automatically fall back to Wi-Fi / 4G network location on Timeout or Position Unavailable
-        requestNetworkFallback();
+      (position) => {
+        const url = buildGoogleMapsUrl(
+          position.coords.latitude,
+          position.coords.longitude
+        );
+        onChange(url);
+        setIsLocating(false);
+        setStatusNotice(null);
+      },
+      () => {
+        // Step 2: Automatic Smart Fallback via Free IP Geolocation (no yellow error)
+        void runIpFallback();
       },
       {
-        enableHighAccuracy: true,
+        enableHighAccuracy: false,
         timeout: 8000,
         maximumAge: 60000,
       }
@@ -95,7 +173,7 @@ export function MapsLocationField({
 
   return (
     <div className="space-y-2.5 pt-1">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <label
           htmlFor={`${idPrefix}-google-maps-link`}
           className="block text-xs font-medium text-slate-700"
@@ -104,26 +182,39 @@ export function MapsLocationField({
           <span className="font-normal text-slate-400">(មិនចាំបាច់)</span>
         </label>
 
-        <button
-          type="button"
-          onClick={handleCaptureGps}
-          disabled={disabled || isLocating}
-          className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-[#0F4C5C]/30 bg-[#0F4C5C]/[0.05] px-3 py-1.5 text-xs font-semibold text-[#0F4C5C] transition-colors hover:bg-[#0F4C5C]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isLocating ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              {locatingStage === 'network'
-                ? 'កំពុងចាប់ទីតាំងតាម Wi-Fi/4G...'
-                : 'កំពុងចាប់ទីតាំង GPS...'}
-            </>
-          ) : (
-            <>
-              <Navigation className="h-3.5 w-3.5" aria-hidden="true" />
-              📍 យកទីតាំងបច្ចុប្បន្ន (GPS)
-            </>
-          )}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCaptureGps}
+            disabled={disabled || isLocating}
+            className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-[#0F4C5C]/30 bg-[#0F4C5C]/[0.05] px-3 py-1.5 text-xs font-semibold text-[#0F4C5C] transition-colors hover:bg-[#0F4C5C]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLocating ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                {locatingStage === 'ip'
+                  ? 'កំពុងចាប់ទីតាំងតាមបណ្តាញ...'
+                  : 'កំពុងចាប់ទីតាំង GPS...'}
+              </>
+            ) : (
+              <>
+                <Navigation className="h-3.5 w-3.5" aria-hidden="true" />
+                📍 យកទីតាំងបច្ចុប្បន្ន (GPS)
+              </>
+            )}
+          </button>
+
+          <a
+            href="https://maps.google.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="បើក Google Maps រើសទីតាំង រួចចុច Share → Copy Link មក Paste"
+            className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-[#0F4C5C]/40 hover:bg-slate-50 hover:text-[#0F4C5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C5C] whitespace-nowrap shrink-0"
+          >
+            🗺️ បើក Google Maps
+            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+          </a>
+        </div>
       </div>
 
       <div className="relative">
@@ -132,7 +223,7 @@ export function MapsLocationField({
           type="url"
           value={value}
           onChange={(e) => {
-            setGeoError(null);
+            setStatusNotice(null);
             onChange(e.target.value);
           }}
           disabled={disabled}
@@ -143,7 +234,7 @@ export function MapsLocationField({
           <button
             type="button"
             onClick={() => {
-              setGeoError(null);
+              setStatusNotice(null);
               onChange('');
             }}
             aria-label="សម្អាតតំណភ្ជាប់ Google Maps"
@@ -154,16 +245,27 @@ export function MapsLocationField({
         )}
       </div>
 
-      {geoError && (
+      {statusNotice && (
         <div
-          role="alert"
-          className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          role="status"
+          className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+            statusNotice.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 font-medium text-emerald-800'
+              : 'border-blue-200 bg-blue-50 text-blue-900'
+          }`}
         >
-          <AlertCircle
-            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700"
-            aria-hidden="true"
-          />
-          <span>{geoError}</span>
+          {statusNotice.type === 'success' ? (
+            <CheckCircle2
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600"
+              aria-hidden="true"
+            />
+          ) : (
+            <Info
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600"
+              aria-hidden="true"
+            />
+          )}
+          <span>{statusNotice.message}</span>
         </div>
       )}
 
